@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - database_network
+    restart: unless-stopped
+
+  app:
+    build:
+      dockerfile: Dockerfile
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - .:/app
+    env_file: .env
+    restart: on-failure
+    networks:
+      - database_network
+    ports:
+      - "8000:8000"
+    expose:
+      - 8000
+
+
+volumes:
+  postgres_data:
+networks:
+  database_network:
