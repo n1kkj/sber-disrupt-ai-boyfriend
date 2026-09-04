@@ -7,8 +7,6 @@ from app.models.boyfriend import Boyfriend
 
 
 class BoyfriendService:
-    def __init__(self, boyfriend_dao: BoyfriendDao) -> None:
-        self.boyfriend_dao = boyfriend_dao
-
-    async def list_active(self, db: AsyncSession) -> List[Boyfriend]:
-        return await self.boyfriend_dao.list_active(db)
+    @classmethod
+    async def list_active(cls: type['BoyfriendService'], db: AsyncSession) -> List[Boyfriend]:
+        return await BoyfriendDao.list_active(db)

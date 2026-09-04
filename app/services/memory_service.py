@@ -5,8 +5,8 @@ from app.models.message import Message
 
 
 class MemoryService:
-    @staticmethod
-    def select_context(messages: List[Message], query: str, limit: int = 8) -> List[Message]:
+    @classmethod
+    def select_context(cls: type['MemoryService'], messages: List[Message], query: str, limit: int = 8) -> List[Message]:
         if not messages:
             return []
         query_words = set(re.findall(r'[a-zа-яё0-9]{3,}', query.lower()))

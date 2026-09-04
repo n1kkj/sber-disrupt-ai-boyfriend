@@ -20,7 +20,7 @@ class ApplicationLifecycle:
             await connection.run_sync(Base.metadata.create_all)
         main_app.state.db = self.session_factory
         async with self.session_factory() as session:
-            await BoyfriendDao().ensure_default(session)
+            await BoyfriendDao.ensure_default(session)
         yield
 
 

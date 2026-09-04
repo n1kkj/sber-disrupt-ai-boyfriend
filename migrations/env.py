@@ -26,7 +26,6 @@ if config.config_file_name is not None:
 # target_metadata = mymodel.Base.metadata
 from app.models import base_model
 from app.models import boyfriend, chat, message, user
-from app.models import entities
 
 target_metadata = base_model.Base.metadata
 
