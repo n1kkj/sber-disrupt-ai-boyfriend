@@ -2,11 +2,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from fastapi import Request
 
-import settings
+from settings import config
 
 async_engine = create_async_engine(
-    settings.SQLALCHEMY_DATABASE_URL,
-    echo=settings.DEBUG,
+    config.sqlalchemy_database_url,
+    echo=config.debug,
     future=True,
 )
 

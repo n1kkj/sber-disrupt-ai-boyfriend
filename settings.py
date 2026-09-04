@@ -1,23 +1,53 @@
-import os
-from dotenv import load_dotenv
+from functools import lru_cache
 
-load_dotenv('.env')
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DB_HOST = os.getenv('DB_HOST', 'db')
-DB_PORT = os.getenv('DB_PORT', 5432)
-DB_NAME = os.getenv('DB_NAME', 'postgres')
-DB_USER = os.getenv('DB_USER', 'postgres')
-DB_PASS = os.getenv('DB_PASS', 'postgres')
-JWT_SECRET = os.getenv('JWT_SECRET', 'change-me-in-production')
-JWT_EXPIRE_MINUTES = int(os.getenv('JWT_EXPIRE_MINUTES', '10080'))
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_WEBHOOK_SECRET = os.getenv('TELEGRAM_WEBHOOK_SECRET')
 
-SQLALCHEMY_DATABASE_URL = f'postgresql+asyncpg://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
+class DatabaseConfig(BaseSettings):
+    host: str = 'db'
+    port: int = 5432
+    name: str = 'postgres'
+    user: str = 'postgres'
+    password: str = 'postgres'
+    model_config = SettingsConfigDict(env_prefix='DB_', env_file='.env', extra='ignore')
 
-DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
-APP_CONFIG = {'title': 'fastapi-app', 'debug': DEBUG}
-if not DEBUG:
-    APP_CONFIG['openapi_url'] = None
+
+class AuthConfig(BaseSettings):
+    secret: str = 'change-me-in-production'
+    expire_minutes: int = 10080
+    model_config = SettingsConfigDict(env_prefix='JWT_', env_file='.env', extra='ignore')
+
+
+class GeminiConfig(BaseSettings):
+    api_key: str = ''
+    model: str = 'gemini-2.0-flash'
+    model_config = SettingsConfigDict(env_prefix='GEMINI_', env_file='.env', extra='ignore')
+
+
+class TelegramConfig(BaseSettings):
+    bot_token: str = ''
+    webhook_secret: str = ''
+    model_config = SettingsConfigDict(env_prefix='TELEGRAM_', env_file='.env', extra='ignore')
+
+
+class Settings(BaseSettings):
+    db: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
+    gemini: GeminiConfig = Field(default_factory=GeminiConfig)
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    debug: bool = True
+    app_title: str = 'AI boyfriend MVP'
+    model_config = SettingsConfigDict(env_file='.env', extra='ignore')
+
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        return f'postgresql+asyncpg://{self.db.user}:{self.db.password}@{self.db.host}:{self.db.port}/{self.db.name}'
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
+
+
+config = get_settings()

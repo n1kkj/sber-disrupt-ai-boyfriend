@@ -1,4 +1,4 @@
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 import sqlalchemy as sa
@@ -12,9 +12,9 @@ class Base:
     __name__: str
 
     @declared_attr
-    def __tablename__(self) -> str:
-        return self.__name__.lower()
+    def __tablename__(cls) -> str:
+        return cls.__name__.lower()
 
-
-def aware_utcnow():
-    return datetime.now(UTC).replace(tzinfo=None)
+    @staticmethod
+    def utcnow() -> datetime:
+        return datetime.now(UTC).replace(tzinfo=None)

@@ -1,9 +1,7 @@
 import asyncio
-import os
 import sys
 from logging.config import fileConfig
 
-from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -13,7 +11,6 @@ from alembic import context
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 
-load_dotenv()
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -28,6 +25,7 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.models import base_model
+from app.models import boyfriend, chat, message, user
 from app.models import entities
 
 target_metadata = base_model.Base.metadata
@@ -37,14 +35,11 @@ target_metadata = base_model.Base.metadata
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
 
-db_name = os.environ['DB_NAME']
-db_user = os.environ['DB_USER']
-db_pass = os.environ['DB_PASS']
-db_host = os.environ['DB_HOST']
-db_port = os.environ['DB_PORT']
+from settings import config as app_config
+
 config.set_main_option(
     'sqlalchemy.url',
-    f'postgresql+asyncpg://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}',
+    app_config.sqlalchemy_database_url,
 )
 
 
