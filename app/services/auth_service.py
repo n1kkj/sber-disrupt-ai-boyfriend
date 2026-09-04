@@ -3,7 +3,6 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dao.user_dao import UserDao
-from app.models.user import User
 from app.security import SecurityService
 
 
