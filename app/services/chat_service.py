@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dao.chat_dao import ChatDao
 from app.dao.message_dao import MessageDao
 from app.models.message import Message
-from app.services.gemini_service import GeminiService
+from app.services.gemini_service import GeminiAIService
 from app.services.memory_service import MemoryService
 
 
@@ -21,6 +21,6 @@ class ChatService:
         user_message = await MessageDao.create(db, chat.id, 'user', content)
         context = MemoryService.select_context(history + [user_message], content)
         prompt_messages: List[Dict[str, str]] = [{'role': item.role, 'content': item.content} for item in context]
-        reply = await GeminiService.generate_reply(boyfriend.system_prompt, prompt_messages)
+        reply = await GeminiAIService.generate_reply(boyfriend.system_prompt, prompt_messages)
         assistant_message = await MessageDao.create(db, chat.id, 'assistant', reply)
         return await MessageDao.commit_pair(db, user_message, assistant_message)

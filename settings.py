@@ -20,8 +20,10 @@ class AuthConfig(BaseSettings):
 
 
 class GeminiConfig(BaseSettings):
-    api_key: str = ''
-    model: str = 'gemini-2.0-flash'
+    API_KEY: str = ''
+    MODEL: str = 'gemini-2.5-flash'
+    EMBEDDING_MODEL: str = 'gemini-embedding-001'
+    BASE_URL: str = 'https://generativelanguage.googleapis.com/v1beta/openai/'
     model_config = SettingsConfigDict(env_prefix='GEMINI_', env_file='.env', extra='ignore')
 
 
