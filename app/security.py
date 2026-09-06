@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import json
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from settings import config
@@ -33,7 +33,7 @@ class SecurityService:
 
     @classmethod
     def create_access_token(cls: type['SecurityService'], user_id: str) -> str:
-        payload: Dict[str, Any] = {'sub': user_id, 'exp': int((datetime.now(UTC) + timedelta(minutes=config.auth.expire_minutes)).timestamp())}
+        payload: Dict[str, Any] = {'sub': user_id, 'exp': int((datetime.now(timezone.utc) + timedelta(minutes=config.auth.expire_minutes)).timestamp())}
         header = cls._b64(json.dumps({'alg': 'HS256', 'typ': 'JWT'}, separators=(',', ':')).encode())
         body = cls._b64(json.dumps(payload, separators=(',', ':')).encode())
         signature = cls._b64(hmac.new(config.auth.secret.encode(), f'{header}.{body}'.encode(), hashlib.sha256).digest())
@@ -48,7 +48,7 @@ class SecurityService:
                 raise ValueError('invalid signature')
             padding = '=' * (-len(body) % 4)
             payload = json.loads(base64.urlsafe_b64decode(f'{body}{padding}'.encode()))
-            if int(payload['exp']) < int(datetime.now(UTC).timestamp()):
+            if int(payload['exp']) < int(datetime.now(timezone.utc).timestamp()):
                 raise ValueError('expired token')
             return payload
         except (ValueError, KeyError, TypeError, json.JSONDecodeError):

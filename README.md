@@ -17,7 +17,11 @@ GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 TELEGRAM_BOT_TOKEN=your-token
 TELEGRAM_WEBHOOK_SECRET=random-secret
+TELEGRAM_MODE=webhook
+TELEGRAM_POLLING_TIMEOUT=25
 ```
+
+Для локального запуска без HTTPS укажите `TELEGRAM_MODE=polling`. Для production с HTTPS используйте `TELEGRAM_MODE=webhook`.
 
 Запуск:
 

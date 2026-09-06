@@ -30,6 +30,8 @@ class GeminiConfig(BaseSettings):
 class TelegramConfig(BaseSettings):
     bot_token: str = ''
     webhook_secret: str = ''
+    mode: str = 'webhook'
+    polling_timeout: int = 25
     model_config = SettingsConfigDict(env_prefix='TELEGRAM_', env_file='.env', extra='ignore')
 
 
