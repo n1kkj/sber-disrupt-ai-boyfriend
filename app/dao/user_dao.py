@@ -32,3 +32,14 @@ class UserDao:
         await db.commit()
         await db.refresh(user)
         return user
+
+    @classmethod
+    async def set_telegram_id(cls: type['UserDao'], db: AsyncSession, user: User, telegram_id: int) -> User:
+        user.telegram_id = telegram_id
+        await db.flush()
+        return user
+
+    @classmethod
+    async def delete(cls: type['UserDao'], db: AsyncSession, user: User) -> None:
+        await db.delete(user)
+        await db.flush()

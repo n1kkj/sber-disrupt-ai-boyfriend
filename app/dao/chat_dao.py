@@ -39,3 +39,8 @@ class ChatDao:
     @classmethod
     async def get_first_for_user(cls: type['ChatDao'], db: AsyncSession, user_id: UUID) -> Optional[Chat]:
         return await db.scalar(sa.select(Chat).where(Chat.user_id == user_id).order_by(Chat.created_at).limit(1))
+
+    @classmethod
+    async def transfer_to_user(cls: type['ChatDao'], db: AsyncSession, source_user_id: UUID, target_user_id: UUID) -> None:
+        await db.execute(sa.update(Chat).where(Chat.user_id == source_user_id).values(user_id=target_user_id))
+        await db.flush()

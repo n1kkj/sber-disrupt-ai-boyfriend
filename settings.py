@@ -31,9 +31,11 @@ class GeminiConfig(BaseSettings):
 
 class TelegramConfig(BaseSettings):
     bot_token: str = ''
+    bot_username: str = ''
     webhook_secret: str = ''
     mode: str = 'webhook'
     polling_timeout: int = 25
+    link_token_ttl_minutes: int = 10
     proxy_url: Optional[str] = None
     model_config = SettingsConfigDict(env_prefix='TELEGRAM_', env_file='.env', extra='ignore')
 
@@ -45,6 +47,7 @@ class Settings(BaseSettings):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     debug: bool = True
     app_title: str = 'AI boyfriend MVP'
+    platform_url: str = 'http://localhost:3000'
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
     @property

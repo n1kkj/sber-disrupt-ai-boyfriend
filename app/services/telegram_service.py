@@ -13,6 +13,7 @@ from app.clients.http_client import HttpClientFactory
 from app.models.chat import Chat
 from app.security import SecurityService
 from app.services.chat_service import ChatService
+from app.services.account_link_service import AccountLinkService
 from settings import config
 
 
@@ -32,14 +33,17 @@ class TelegramService:
         return await ChatDao.commit(db, chat)
 
     @classmethod
-    async def send_message(cls: type['TelegramService'], chat_id: int, text: str) -> None:
+    async def send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
         if not config.telegram.bot_token:
             return
-        await asyncio.to_thread(cls._send_message, chat_id, text)
+        await asyncio.to_thread(cls._send_message, chat_id, text, reply_markup)
 
     @classmethod
-    def _send_message(cls: type['TelegramService'], chat_id: int, text: str) -> None:
-        requests.post(f'https://api.telegram.org/bot{config.telegram.bot_token}/sendMessage', json={'chat_id': chat_id, 'text': text}, proxies=HttpClientFactory.get_requests_proxies('telegram'), timeout=20).raise_for_status()
+    def _send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
+        payload: Dict[str, Any] = {'chat_id': chat_id, 'text': text}
+        if reply_markup is not None:
+            payload['reply_markup'] = reply_markup
+        requests.post(f'https://api.telegram.org/bot{config.telegram.bot_token}/sendMessage', json=payload, proxies=HttpClientFactory.get_requests_proxies('telegram'), timeout=20).raise_for_status()
 
     @classmethod
     async def set_webhook(cls: type['TelegramService'], webhook_url: str) -> None:
@@ -60,13 +64,35 @@ class TelegramService:
             return
         telegram_chat_id = int(message['chat']['id'])
         telegram_user = message.get('from', {})
+        text = str(message['text'])
+        username = telegram_user.get('username') or telegram_user.get('first_name')
+        if text.startswith('/start'):
+            payload = text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) == 2 else ''
+            if payload.startswith('link_'):
+                try:
+                    await AccountLinkService.claim_by_telegram(db, payload.removeprefix('link_'), telegram_chat_id)
+                    await cls.send_message(telegram_chat_id, 'Telegram подключен к аккаунту платформы.', cls._connect_keyboard())
+                except ValueError as error:
+                    await cls.send_message(telegram_chat_id, str(error), cls._connect_keyboard())
+                return
+            await cls.send_message(telegram_chat_id, 'Привет! Я рядом. Нажми кнопку, чтобы подключить Telegram к платформе.', cls._connect_keyboard())
+            return
+        if text == 'Подключиться к платформе':
+            raw_token, expires_at = await AccountLinkService.create_for_telegram(db, telegram_chat_id)
+            platform_url = f'{config.platform_url.rstrip("/")}/?telegram_link={raw_token}'
+            await cls.send_message(telegram_chat_id, f'Открой ссылку и войди или зарегистрируйся на платформе. Ссылка действует до {expires_at:%H:%M}.\n\n{platform_url}', cls._connect_keyboard())
+            return
         try:
-            chat = await cls.get_or_create_chat(db, telegram_chat_id, telegram_user.get('username') or telegram_user.get('first_name'))
-            _, answer = await ChatService.reply_to_message(db, chat.user_id, chat.id, str(message['text']))
-            await cls.send_message(telegram_chat_id, answer.content)
+            chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
+            _, answer = await ChatService.reply_to_message(db, chat.user_id, chat.id, text)
+            await cls.send_message(telegram_chat_id, answer.content, cls._connect_keyboard())
         except Exception:
             await db.rollback()
-            await cls.send_message(telegram_chat_id, 'Не получилось ответить. Попробуй еще раз через минуту.')
+            await cls.send_message(telegram_chat_id, 'Не получилось ответить. Попробуй еще раз через минуту.', cls._connect_keyboard())
+
+    @classmethod
+    def _connect_keyboard(cls: type['TelegramService']) -> Dict[str, Any]:
+        return {'keyboard': [[{'text': 'Подключиться к платформе'}]], 'resize_keyboard': True, 'is_persistent': True}
 
     @classmethod
     async def polling_loop(cls: type['TelegramService'], session_factory: async_sessionmaker, stop_event: asyncio.Event) -> None:
