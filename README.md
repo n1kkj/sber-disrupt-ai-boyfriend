@@ -15,13 +15,17 @@ GEMINI_API_KEY=your-key
 GEMINI_MODEL=gemini-2.5-flash
 GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+GEMINI_PROXY_URL=http://user:password@proxy-host:port
 TELEGRAM_BOT_TOKEN=your-token
 TELEGRAM_WEBHOOK_SECRET=random-secret
 TELEGRAM_MODE=webhook
 TELEGRAM_POLLING_TIMEOUT=25
+TELEGRAM_PROXY_URL=http://user:password@proxy-host:port
 ```
 
 Для локального запуска без HTTPS укажите `TELEGRAM_MODE=polling`. Для production с HTTPS используйте `TELEGRAM_MODE=webhook`.
+
+Если Telegram или Gemini недоступны напрямую, задайте соответствующий proxy URL. Формат: `http://user:password@host:port`. Для Telegram прокси используется всеми запросами `requests`, для Gemini -- `httpx`-клиентом LangChain.
 
 Запуск:
 

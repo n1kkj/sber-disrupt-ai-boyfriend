@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,6 +25,7 @@ class GeminiConfig(BaseSettings):
     model: str = 'gemini-2.5-flash'
     embedding_model: str = 'gemini-embedding-001'
     base_url: str = 'https://generativelanguage.googleapis.com/v1beta/openai/'
+    proxy_url: Optional[str] = None
     model_config = SettingsConfigDict(env_prefix='GEMINI_', env_file='.env', extra='ignore')
 
 
@@ -32,6 +34,7 @@ class TelegramConfig(BaseSettings):
     webhook_secret: str = ''
     mode: str = 'webhook'
     polling_timeout: int = 25
+    proxy_url: Optional[str] = None
     model_config = SettingsConfigDict(env_prefix='TELEGRAM_', env_file='.env', extra='ignore')
 
 

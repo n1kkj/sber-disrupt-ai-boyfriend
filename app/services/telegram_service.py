@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.dao.boyfriend_dao import BoyfriendDao
 from app.dao.chat_dao import ChatDao
 from app.dao.user_dao import UserDao
+from app.clients.http_client import HttpClientFactory
 from app.models.chat import Chat
 from app.security import SecurityService
 from app.services.chat_service import ChatService
@@ -38,7 +39,7 @@ class TelegramService:
 
     @classmethod
     def _send_message(cls: type['TelegramService'], chat_id: int, text: str) -> None:
-        requests.post(f'https://api.telegram.org/bot{config.telegram.bot_token}/sendMessage', json={'chat_id': chat_id, 'text': text}, timeout=20).raise_for_status()
+        requests.post(f'https://api.telegram.org/bot{config.telegram.bot_token}/sendMessage', json={'chat_id': chat_id, 'text': text}, proxies=HttpClientFactory.get_requests_proxies('telegram'), timeout=20).raise_for_status()
 
     @classmethod
     async def set_webhook(cls: type['TelegramService'], webhook_url: str) -> None:
@@ -70,8 +71,12 @@ class TelegramService:
     @classmethod
     async def polling_loop(cls: type['TelegramService'], session_factory: async_sessionmaker, stop_event: asyncio.Event) -> None:
         offset = 0
+        webhook_deleted = False
         while not stop_event.is_set():
             try:
+                if not webhook_deleted:
+                    await cls.delete_webhook()
+                    webhook_deleted = True
                 updates = await asyncio.to_thread(cls._get_updates, offset)
                 for update in updates:
                     offset = max(offset, int(update['update_id']) + 1)
@@ -87,11 +92,11 @@ class TelegramService:
         payload = {'url': webhook_url}
         if config.telegram.webhook_secret:
             payload['secret_token'] = config.telegram.webhook_secret
-        requests.post(f'https://api.telegram.org/bot{config.telegram.bot_token}/setWebhook', json=payload, timeout=20).raise_for_status()
+        requests.post(f'https://api.telegram.org/bot{config.telegram.bot_token}/setWebhook', json=payload, proxies=HttpClientFactory.get_requests_proxies('telegram'), timeout=20).raise_for_status()
 
     @classmethod
     def _delete_webhook(cls: type['TelegramService']) -> None:
-        requests.post(f'https://api.telegram.org/bot{config.telegram.bot_token}/deleteWebhook', timeout=20).raise_for_status()
+        requests.post(f'https://api.telegram.org/bot{config.telegram.bot_token}/deleteWebhook', proxies=HttpClientFactory.get_requests_proxies('telegram'), timeout=20).raise_for_status()
 
     @classmethod
     def _get_updates(cls: type['TelegramService'], offset: int) -> List[Dict[str, Any]]:
@@ -102,6 +107,7 @@ class TelegramService:
                 'timeout': config.telegram.polling_timeout,
                 'allowed_updates': json.dumps(['message', 'edited_message']),
             },
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
             timeout=config.telegram.polling_timeout + 10,
         )
         response.raise_for_status()

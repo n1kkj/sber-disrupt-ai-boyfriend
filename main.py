@@ -30,7 +30,6 @@ class ApplicationLifecycle:
         if config.telegram.mode.lower() == 'polling':
             if not config.telegram.bot_token:
                 raise RuntimeError('TELEGRAM_BOT_TOKEN is required when TELEGRAM_MODE=polling')
-            await TelegramService.delete_webhook()
             polling_task = asyncio.create_task(TelegramService.polling_loop(self.session_factory, stop_event))
         try:
             yield
