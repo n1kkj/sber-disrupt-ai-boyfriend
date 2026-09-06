@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import uvicorn
@@ -15,6 +16,7 @@ class ApplicationLifecycle:
     def __init__(self, session_factory: async_sessionmaker) -> None:
         self.session_factory = session_factory
 
+    @asynccontextmanager
     async def __call__(self, main_app: FastAPI) -> AsyncIterator[None]:
         async with async_engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
