@@ -83,3 +83,6 @@ urllib3==2.7.0
     # via requests
 uvicorn==0.52.4
     # via sber-disrupt-ai-boyfriend (pyproject.toml)
+langchain-openai>=0.3.35
+PyJWT~=2.10.1
+pwdlib[argon2]~=0.2.1

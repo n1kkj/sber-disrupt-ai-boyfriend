@@ -1,23 +1,38 @@
 import base64
 import hashlib
 import hmac
-import json
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
+
+import jwt
+from jwt.exceptions import InvalidTokenError
+from pwdlib import PasswordHash
 
 from settings import config
 
 
 class SecurityService:
+    password_hash = PasswordHash.recommended()
+
     @classmethod
     def hash_password(cls: type['SecurityService'], password: str) -> str:
-        salt = os.urandom(16)
-        digest = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 120000)
-        return f'{cls._b64(salt)}${cls._b64(digest)}'
+        return cls.password_hash.hash(password)
 
     @classmethod
     def verify_password(cls: type['SecurityService'], password: str, encoded: str) -> bool:
+        if encoded.startswith('$argon2'):
+            try:
+                return cls.password_hash.verify(password, encoded)
+            except (ValueError, TypeError):
+                return False
+        return cls._verify_legacy_password(password, encoded)
+
+    @classmethod
+    def needs_password_rehash(cls: type['SecurityService'], encoded: str) -> bool:
+        return not encoded.startswith('$argon2')
+
+    @classmethod
+    def _verify_legacy_password(cls: type['SecurityService'], password: str, encoded: str) -> bool:
         try:
             salt_text, digest_text = encoded.split('$', 1)
             salt = base64.urlsafe_b64decode(salt_text.encode())
@@ -28,28 +43,19 @@ class SecurityService:
         return hmac.compare_digest(actual, expected)
 
     @classmethod
-    def _b64(cls: type['SecurityService'], value: bytes) -> str:
-        return base64.urlsafe_b64encode(value).rstrip(b'=').decode()
-
-    @classmethod
     def create_access_token(cls: type['SecurityService'], user_id: str) -> str:
-        payload: Dict[str, Any] = {'sub': user_id, 'exp': int((datetime.now(timezone.utc) + timedelta(minutes=config.auth.expire_minutes)).timestamp())}
-        header = cls._b64(json.dumps({'alg': 'HS256', 'typ': 'JWT'}, separators=(',', ':')).encode())
-        body = cls._b64(json.dumps(payload, separators=(',', ':')).encode())
-        signature = cls._b64(hmac.new(config.auth.secret.encode(), f'{header}.{body}'.encode(), hashlib.sha256).digest())
-        return f'{header}.{body}.{signature}'
+        payload: Dict[str, Any] = {
+            'sub': user_id,
+            'exp': datetime.now(timezone.utc) + timedelta(minutes=config.auth.expire_minutes),
+        }
+        return jwt.encode(payload, config.auth.secret, algorithm='HS256')
 
     @classmethod
     def decode_access_token(cls: type['SecurityService'], token: str) -> Dict[str, Any]:
         try:
-            header, body, signature = token.split('.')
-            expected = cls._b64(hmac.new(config.auth.secret.encode(), f'{header}.{body}'.encode(), hashlib.sha256).digest())
-            if not hmac.compare_digest(signature, expected):
-                raise ValueError('invalid signature')
-            padding = '=' * (-len(body) % 4)
-            payload = json.loads(base64.urlsafe_b64decode(f'{body}{padding}'.encode()))
-            if int(payload['exp']) < int(datetime.now(timezone.utc).timestamp()):
-                raise ValueError('expired token')
-            return payload
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+            payload = jwt.decode(token, config.auth.secret, algorithms=['HS256'])
+        except InvalidTokenError as error:
+            raise ValueError('invalid token') from error
+        if not payload.get('sub'):
             raise ValueError('invalid token')
+        return payload
