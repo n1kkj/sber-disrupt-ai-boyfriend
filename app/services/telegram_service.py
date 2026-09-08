@@ -12,6 +12,7 @@ from app.dao.user_dao import UserDao
 from app.clients.http_client import HttpClientFactory
 from app.logging import logger
 from app.models.chat import Chat
+from app.models.user import User
 from app.security import SecurityService
 from app.services.account_link_service import AccountLinkService
 from app.services.message_service import MessageService
@@ -23,14 +24,22 @@ class TelegramService:
     async def get_or_create_chat(cls: type['TelegramService'], db: AsyncSession, telegram_id: int, username: Optional[str]) -> Chat:
         user = await UserDao.get_by_telegram_id(db, telegram_id)
         if user is None:
-            user = await UserDao.create(db, f'telegram_{telegram_id}@local.invalid', SecurityService.hash_password(secrets.token_urlsafe(24)), username, telegram_id)
-        chat = await ChatDao.get_first_for_user(db, user.id)
+            user = await UserDao.create(
+                db,
+                f'telegram_{telegram_id}@local.invalid',
+                SecurityService.hash_password(secrets.token_urlsafe(24)),
+                username,
+                telegram_id,
+                True,
+            )
+            logger.info('telegram_only_user_created chat_suffix=%s', str(telegram_id)[-4:])
+        chat = await ChatDao.get_for_platform(db, user.id, 'telegram')
         if chat is not None:
             return chat
         boyfriend = await BoyfriendDao.get_first_active(db)
         if boyfriend is None:
             raise RuntimeError('No active boyfriend configured')
-        chat = await ChatDao.create(db, user.id, boyfriend.id, 'Telegram chat')
+        chat = await ChatDao.create(db, user.id, boyfriend.id, 'Telegram chat', 'telegram')
         return await ChatDao.commit(db, chat)
 
     @classmethod
@@ -88,24 +97,33 @@ class TelegramService:
         telegram_user = message.get('from', {})
         text = str(message['text'])
         username = telegram_user.get('username') or telegram_user.get('first_name')
+        current_user = await UserDao.get_by_telegram_id(db, telegram_chat_id)
+        is_platform_connected = current_user is not None and not current_user.is_telegram_only
         if text.startswith('/start'):
             payload = text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) == 2 else ''
             if payload.startswith('link_'):
                 try:
                     await AccountLinkService.claim_by_telegram(db, payload.removeprefix('link_'), telegram_chat_id)
                     logger.info('telegram_account_link_completed chat_suffix=%s', str(telegram_chat_id)[-4:])
-                    await cls.send_message(telegram_chat_id, 'Telegram подключен к аккаунту платформы.', cls._connect_keyboard())
+                    await cls.send_message(telegram_chat_id, 'Telegram подключен к аккаунту платформы.', cls._connect_keyboard(True))
                 except ValueError as error:
                     logger.warning('telegram_account_link_rejected chat_suffix=%s reason=%s', str(telegram_chat_id)[-4:], error)
-                    await cls.send_message(telegram_chat_id, str(error), cls._connect_keyboard())
+                    await cls.send_message(telegram_chat_id, str(error), cls._connect_keyboard(is_platform_connected))
                 return
-            await cls.send_message(telegram_chat_id, 'Привет! Я рядом. Нажми кнопку, чтобы подключить Telegram к платформе.', cls._connect_keyboard())
+            if is_platform_connected:
+                await cls.send_message(telegram_chat_id, 'Привет! Я рядом.', cls._connect_keyboard(True))
+            else:
+                await cls.send_message(telegram_chat_id, 'Привет! Я рядом. Нажми кнопку, чтобы подключить Telegram к платформе.', cls._connect_keyboard(False))
             return
         if text == 'Подключиться к платформе':
+            if is_platform_connected:
+                logger.info('telegram_account_link_skipped reason=already_connected chat_suffix=%s', str(telegram_chat_id)[-4:])
+                await cls.send_message(telegram_chat_id, 'Telegram уже подключен к платформе.', cls._connect_keyboard(True))
+                return
             logger.info('telegram_account_link_requested chat_suffix=%s', str(telegram_chat_id)[-4:])
             raw_token, expires_at = await AccountLinkService.create_for_telegram(db, telegram_chat_id)
             platform_url = f'{config.platform_url.rstrip("/")}/?telegram_link={raw_token}'
-            await cls.send_message(telegram_chat_id, f'Открой ссылку и войди или зарегистрируйся на платформе. Ссылка действует до {expires_at:%H:%M}.\n\n{platform_url}', cls._connect_keyboard())
+            await cls.send_message(telegram_chat_id, f'Открой ссылку и войди или зарегистрируйся на платформе. Ссылка действует до {expires_at:%H:%M}.\n\n{platform_url}', cls._connect_keyboard(False))
             return
         try:
             chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
@@ -125,14 +143,16 @@ class TelegramService:
                 idempotency_key=f'telegram:{update_id}' if update_id is not None else None,
             )
             if answer is not None and is_new:
-                await cls.send_message(telegram_chat_id, answer.content, cls._connect_keyboard())
+                await cls.send_message(telegram_chat_id, answer.content, cls._connect_keyboard(is_platform_connected))
         except Exception:
             logger.exception('telegram_update_processing_failed chat_suffix=%s update_id=%s', str(telegram_chat_id)[-4:], update.get('update_id'))
             await db.rollback()
-            await cls.send_message(telegram_chat_id, 'Не получилось ответить. Попробуй еще раз через минуту.', cls._connect_keyboard())
+            await cls.send_message(telegram_chat_id, 'Не получилось ответить. Попробуй еще раз через минуту.', cls._connect_keyboard(is_platform_connected))
 
     @classmethod
-    def _connect_keyboard(cls: type['TelegramService']) -> Dict[str, Any]:
+    def _connect_keyboard(cls: type['TelegramService'], connected: bool = False) -> Dict[str, Any]:
+        if connected:
+            return {'remove_keyboard': True}
         return {'keyboard': [[{'text': 'Подключиться к платформе'}]], 'resize_keyboard': True, 'is_persistent': True}
 
     @classmethod

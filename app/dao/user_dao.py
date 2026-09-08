@@ -21,8 +21,22 @@ class UserDao:
         return await db.scalar(sa.select(User).where(User.telegram_id == telegram_id))
 
     @classmethod
-    async def create(cls: type['UserDao'], db: AsyncSession, email: str, password_hash: str, display_name: Optional[str], telegram_id: Optional[int] = None) -> User:
-        user = User(email=email, password_hash=password_hash, display_name=display_name, telegram_id=telegram_id)
+    async def create(
+        cls: type['UserDao'],
+        db: AsyncSession,
+        email: str,
+        password_hash: str,
+        display_name: Optional[str],
+        telegram_id: Optional[int] = None,
+        is_telegram_only: bool = False,
+    ) -> User:
+        user = User(
+            email=email,
+            password_hash=password_hash,
+            display_name=display_name,
+            telegram_id=telegram_id,
+            is_telegram_only=is_telegram_only,
+        )
         db.add(user)
         await db.flush()
         return user

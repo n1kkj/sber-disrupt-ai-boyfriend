@@ -11,9 +11,13 @@ from app.models.base_model import Base
 
 class Chat(Base):
     __tablename__ = 'chats'
+    __table_args__ = (
+        sa.Index('uq_chats_user_platform', 'user_id', 'platform', unique=True),
+    )
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='CASCADE'), index=True)
     boyfriend_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), sa.ForeignKey('boyfriends.id'))
+    platform: Mapped[str] = mapped_column(sa.String(20), default='web', index=True)
     title: Mapped[Optional[str]] = mapped_column(sa.String(160), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow)
     updated_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow, onupdate=Base.utcnow)

@@ -113,7 +113,7 @@ class MessageService:
         cls: type['MessageService'],
         db: AsyncSession,
         message_id: UUID,
-    ) -> Tuple[Message, Optional[Message], Optional[int]]:
+    ) -> Tuple[Message, Optional[Message], Optional[int], bool]:
         logger.info('message_processing_started message_id=%s', message_id)
         message_data = await MessageDao.get_with_chat_boyfriend(db, message_id)
         if message_data is None:
@@ -121,13 +121,15 @@ class MessageService:
             raise LookupError('Message not found')
         message, chat, boyfriend = message_data
         user = await UserDao.get_by_id(db, chat.user_id)
+        telegram_id = user.telegram_id if message.platform == 'telegram' and user is not None else None
+        telegram_connected = user is not None and not user.is_telegram_only
         if message.status == 'cancelled':
             logger.info('message_processing_cancelled message_id=%s', message_id)
-            return message, None, user.telegram_id if user is not None else None
+            return message, None, telegram_id, telegram_connected
         assistant = await MessageDao.get_reply(db, message.id)
         if assistant is not None:
             logger.info('message_processing_already_completed message_id=%s assistant_id=%s', message_id, assistant.id)
-            return message, assistant, user.telegram_id if user is not None else None
+            return message, assistant, telegram_id, telegram_connected
 
         message.status = 'processing'
         message.error_message = None
@@ -163,7 +165,7 @@ class MessageService:
         await ChatDao.touch(db, chat.id)
         message, assistant = await MessageDao.commit_pair(db, message, assistant)
         logger.info('message_processing_completed message_id=%s assistant_id=%s', message.id, assistant.id)
-        return message, assistant, user.telegram_id if user is not None else None
+        return message, assistant, telegram_id, telegram_connected
 
     @classmethod
     async def cancel_message(

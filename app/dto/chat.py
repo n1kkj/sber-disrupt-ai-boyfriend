@@ -13,4 +13,5 @@ class ChatResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     boyfriend_id: UUID
+    platform: str
     title: Optional[str]

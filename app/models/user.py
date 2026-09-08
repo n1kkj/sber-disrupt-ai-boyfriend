@@ -16,4 +16,5 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(sa.String(256))
     display_name: Mapped[Optional[str]] = mapped_column(sa.String(120), nullable=True)
     telegram_id: Mapped[Optional[int]] = mapped_column(sa.BigInteger, unique=True, nullable=True)
+    is_telegram_only: Mapped[bool] = mapped_column(sa.Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow)

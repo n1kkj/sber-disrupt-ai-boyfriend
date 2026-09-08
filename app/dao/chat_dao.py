@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.boyfriend import Boyfriend
 from app.models.chat import Chat
 from app.models.base_model import Base
+from app.models.message import Message
 
 
 class ChatDao:
@@ -25,8 +26,24 @@ class ChatDao:
         return list(result)
 
     @classmethod
-    async def create(cls: type['ChatDao'], db: AsyncSession, user_id: UUID, boyfriend_id: UUID, title: Optional[str]) -> Chat:
-        chat = Chat(user_id=user_id, boyfriend_id=boyfriend_id, title=title)
+    async def get_for_platform(cls: type['ChatDao'], db: AsyncSession, user_id: UUID, platform: str) -> Optional[Chat]:
+        return await db.scalar(
+            sa.select(Chat)
+            .where(Chat.user_id == user_id, Chat.platform == platform)
+            .order_by(Chat.created_at)
+            .limit(1)
+        )
+
+    @classmethod
+    async def create(
+        cls: type['ChatDao'],
+        db: AsyncSession,
+        user_id: UUID,
+        boyfriend_id: UUID,
+        title: Optional[str],
+        platform: str = 'web',
+    ) -> Chat:
+        chat = Chat(user_id=user_id, boyfriend_id=boyfriend_id, title=title, platform=platform)
         db.add(chat)
         await db.flush()
         return chat
@@ -42,8 +59,33 @@ class ChatDao:
         return await db.scalar(sa.select(Chat).where(Chat.user_id == user_id).order_by(Chat.created_at).limit(1))
 
     @classmethod
+    async def ensure_for_platform(
+        cls: type['ChatDao'],
+        db: AsyncSession,
+        user_id: UUID,
+        boyfriend_id: UUID,
+        platform: str,
+        title: Optional[str],
+    ) -> Chat:
+        chat = await cls.get_for_platform(db, user_id, platform)
+        if chat is not None:
+            return chat
+        return await cls.create(db, user_id, boyfriend_id, title, platform)
+
+    @classmethod
     async def transfer_to_user(cls: type['ChatDao'], db: AsyncSession, source_user_id: UUID, target_user_id: UUID) -> None:
-        await db.execute(sa.update(Chat).where(Chat.user_id == source_user_id).values(user_id=target_user_id))
+        source_chats = await db.scalars(sa.select(Chat).where(Chat.user_id == source_user_id))
+        for source_chat in list(source_chats):
+            target_chat = await cls.get_for_platform(db, target_user_id, source_chat.platform)
+            if target_chat is None:
+                source_chat.user_id = target_user_id
+                continue
+            await db.execute(
+                sa.update(Message)
+                .where(Message.chat_id == source_chat.id)
+                .values(chat_id=target_chat.id)
+            )
+            await db.delete(source_chat)
         await db.flush()
 
     @classmethod

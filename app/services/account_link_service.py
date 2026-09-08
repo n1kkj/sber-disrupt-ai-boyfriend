@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dao.boyfriend_dao import BoyfriendDao
 from app.dao.chat_dao import ChatDao
 from app.dao.telegram_link_token_dao import TelegramLinkTokenDao
 from app.dao.user_dao import UserDao
@@ -83,6 +84,12 @@ class AccountLinkService:
             await ChatDao.transfer_to_user(db, source_user.id, target_user.id)
             await UserDao.delete(db, source_user)
         await UserDao.set_telegram_id(db, target_user, telegram_id)
+        boyfriend = await BoyfriendDao.get_first_active(db)
+        if boyfriend is None:
+            raise RuntimeError('No active companion configured')
+        await ChatDao.ensure_for_platform(db, target_user.id, boyfriend.id, 'web', 'Web chat')
+        await ChatDao.ensure_for_platform(db, target_user.id, boyfriend.id, 'telegram', 'Telegram chat')
+        logger.info('account_link_platform_chats_ready user_id=%s', target_user.id)
 
     @classmethod
     def _hash_token(cls: type['AccountLinkService'], raw_token: str) -> str:

@@ -24,15 +24,15 @@ class ProcessMessageTask(Task):
         task_id = self.request.id or ''
         RedisTaskService.save_state(message_id, task_id, 'running')
         try:
-            message, assistant, telegram_id = asyncio.run(self._process_message(message_id))
+            message, assistant, telegram_id, telegram_connected = asyncio.run(self._process_message(message_id))
             if message.status == 'cancelled':
                 RedisTaskService.save_state(message_id, task_id, 'cancelled')
                 logger.info('celery_message_task_cancelled message_id=%s task_id=%s', message_id, task_id)
                 return {'message_id': message_id, 'status': 'cancelled'}
-            if assistant is not None and telegram_id is not None:
+            if message.platform == 'telegram' and assistant is not None and telegram_id is not None:
                 from app.services.telegram_service import TelegramService
 
-                asyncio.run(TelegramService.send_message(telegram_id, assistant.content, TelegramService._connect_keyboard()))
+                asyncio.run(TelegramService.send_message(telegram_id, assistant.content, TelegramService._connect_keyboard(telegram_connected)))
             RedisTaskService.save_state(message_id, task_id, 'completed')
             logger.info('celery_message_task_completed message_id=%s task_id=%s', message_id, task_id)
             return {
