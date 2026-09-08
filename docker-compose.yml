@@ -11,6 +11,14 @@ services:
       - database_network
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - database_network
+    restart: unless-stopped
+
   app:
     build:
       dockerfile: Dockerfile
@@ -19,6 +27,9 @@ services:
       - .:/app
     env_file: .env
     restart: on-failure
+    depends_on:
+      - db
+      - redis
     networks:
       - database_network
     ports:
@@ -26,8 +37,36 @@ services:
     expose:
       - 8000
 
+  worker:
+    build:
+      dockerfile: Dockerfile
+    command: celery -A app.celery_app:celery_app worker --loglevel=INFO -Q messages
+    volumes:
+      - .:/app
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+    restart: on-failure
+    networks:
+      - database_network
+
+  beat:
+    build:
+      dockerfile: Dockerfile
+    command: celery -A app.celery_app:celery_app beat --loglevel=INFO
+    volumes:
+      - .:/app
+    env_file: .env
+    depends_on:
+      - redis
+    restart: on-failure
+    networks:
+      - database_network
+
 
 volumes:
   postgres_data:
+  redis_data:
 networks:
   database_network:

@@ -43,4 +43,5 @@ class Message(Base):
         nullable=True,
         index=True,
     )
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow, index=True)

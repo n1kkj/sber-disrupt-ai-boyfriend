@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,6 @@ from app.dao.message_dao import MessageDao
 from app.models.boyfriend import Boyfriend
 from app.models.chat import Chat
 from app.models.message import Message
-from app.services.message_service import MessageService
 
 
 class ChatService:
@@ -36,16 +35,3 @@ class ChatService:
         if await ChatDao.get(db, user_id, chat_id) is None:
             raise LookupError('Chat not found')
         return await MessageDao.list_for_chat(db, chat_id)
-
-    @classmethod
-    async def reply_to_message(
-        cls: type['ChatService'],
-        db: AsyncSession,
-        user_id: UUID,
-        chat_id: UUID,
-        content: str,
-        platform: str = 'web',
-        external_id: Optional[str] = None,
-        idempotency_key: Optional[str] = None,
-    ) -> Tuple[Message, Message, bool]:
-        return await MessageService.process_text(db, user_id, chat_id, content, platform, external_id, idempotency_key)

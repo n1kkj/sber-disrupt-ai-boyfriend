@@ -90,7 +90,7 @@ class TelegramService:
                 if message.get('message_id') is not None
                 else None
             )
-            _, answer, is_new = await MessageService.process_text(
+            _, answer, _, is_new = await MessageService.enqueue_text(
                 db,
                 chat.user_id,
                 chat.id,
@@ -99,7 +99,7 @@ class TelegramService:
                 external_id=external_id,
                 idempotency_key=f'telegram:{update_id}' if update_id is not None else None,
             )
-            if is_new:
+            if answer is not None and is_new:
                 await cls.send_message(telegram_chat_id, answer.content, cls._connect_keyboard())
         except Exception:
             await db.rollback()

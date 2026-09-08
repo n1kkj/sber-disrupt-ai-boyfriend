@@ -8,7 +8,7 @@ from app.database import get_db
 from app.dependencies import current_user
 from app.dto.boyfriend import BoyfriendResponse
 from app.dto.chat import ChatCreateRequest, ChatResponse
-from app.dto.message import MessageRequest, MessageResponse
+from app.dto.message import MessageRequest, MessageResponse, MessageTaskResponse
 from app.models.boyfriend import Boyfriend
 from app.models.chat import Chat
 from app.models.message import Message
@@ -46,25 +46,46 @@ async def list_messages(chat_id: UUID, user: User = Depends(current_user), db: A
         raise HTTPException(status_code=404, detail=str(error))
 
 
-@router.post('/chats/{chat_id}/messages', response_model=List[MessageResponse])
+@router.post('/chats/{chat_id}/messages', response_model=MessageTaskResponse, status_code=202)
 async def send_message(
     chat_id: UUID,
     payload: MessageRequest,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
     x_idempotency_key: Optional[str] = Header(default=None),
-) -> List[Message]:
+) -> MessageTaskResponse:
     try:
-        user_message, assistant_message, _ = await MessageService.process_text(
+        user_message, assistant_message, task_id, _ = await MessageService.enqueue_text(
             db,
             user.id,
             chat_id,
             payload.content,
             platform='web',
             idempotency_key=x_idempotency_key,
+            scheduled_at=payload.scheduled_at,
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error))
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error))
-    return [user_message, assistant_message]
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return MessageTaskResponse(
+        message=user_message,
+        task_id=task_id,
+        task_status='completed' if assistant_message is not None else user_message.status,
+    )
+
+
+@router.post('/chats/{chat_id}/messages/{message_id}/cancel', response_model=MessageTaskResponse)
+async def cancel_message(
+    chat_id: UUID,
+    message_id: UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessageTaskResponse:
+    try:
+        message, task_id = await MessageService.cancel_message(db, user.id, chat_id, message_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    return MessageTaskResponse(message=message, task_id=task_id, task_status=message.status)

@@ -1,19 +1,22 @@
+import asyncio
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
 from app.dao.chat_dao import ChatDao
 from app.dao.message_dao import MessageDao
+from app.dao.user_dao import UserDao
 from app.models.message import Message
 from app.services.gemini_service import GeminiAIService
 from app.services.memory_service import MemoryService
+from app.services.redis_task_service import RedisTaskService
 
 
 class MessageService:
     @classmethod
-    async def process_text(
+    async def enqueue_text(
         cls: type['MessageService'],
         db: AsyncSession,
         user_id: UUID,
@@ -22,26 +25,28 @@ class MessageService:
         platform: str,
         external_id: Optional[str] = None,
         idempotency_key: Optional[str] = None,
-    ) -> Tuple[Message, Message, bool]:
-        chat_boyfriend = await ChatDao.get_with_boyfriend(db, user_id, chat_id)
-        if chat_boyfriend is None:
+        scheduled_at: Optional[datetime] = None,
+    ) -> Tuple[Message, Optional[Message], Optional[str], bool]:
+        if await ChatDao.get_with_boyfriend(db, user_id, chat_id) is None:
             raise LookupError('Chat not found')
-        chat, boyfriend = chat_boyfriend
+        if scheduled_at is not None:
+            if scheduled_at.tzinfo is None:
+                scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+            if scheduled_at <= datetime.now(timezone.utc):
+                raise ValueError('scheduled_at must be in the future')
         existing = await cls._find_existing(db, chat_id, platform, external_id, idempotency_key)
         if existing is not None:
-            reply = await MessageDao.get_reply(db, existing.id)
-            if reply is not None:
-                return existing, reply, False
-            if existing.status == 'failed':
-                existing.status = 'processing'
-                existing.error_message = None
-                await db.commit()
-                await db.refresh(existing)
-                user_message = existing
-            else:
-                raise RuntimeError('Message is already being processed')
+            assistant = await MessageDao.get_reply(db, existing.id)
+            if assistant is not None:
+                return existing, assistant, None, False
+            if existing.status in {'queued', 'processing'}:
+                task_id = await asyncio.to_thread(RedisTaskService.get_task_id, str(existing.id))
+                return existing, None, task_id, False
+            existing.status = 'queued'
+            existing.error_message = None
+            existing.scheduled_at = scheduled_at.replace(tzinfo=None) if scheduled_at is not None else None
+            user_message = existing
         else:
-            normalized_key = idempotency_key or str(uuid4())
             user_message = await MessageDao.create(
                 db,
                 chat_id,
@@ -49,26 +54,67 @@ class MessageService:
                 content,
                 platform=platform,
                 external_id=external_id,
-                idempotency_key=normalized_key,
-                status='processing',
+                idempotency_key=idempotency_key or str(uuid4()),
+                status='queued',
+                scheduled_at=scheduled_at.replace(tzinfo=None) if scheduled_at is not None else None,
             )
-            try:
-                await db.commit()
-            except IntegrityError as error:
-                await db.rollback()
-                duplicate = await cls._find_existing(db, chat_id, platform, external_id, idempotency_key)
-                if duplicate is not None:
-                    duplicate_reply = await MessageDao.get_reply(db, duplicate.id)
-                    if duplicate_reply is not None:
-                        return duplicate, duplicate_reply, False
-                raise RuntimeError('Message with this idempotency key is already being processed') from error
-            await db.refresh(user_message)
+        await db.commit()
+        await db.refresh(user_message)
 
+        task_id = str(uuid4())
+        await asyncio.to_thread(
+            RedisTaskService.save_state,
+            str(user_message.id),
+            task_id,
+            'queued',
+        )
+        try:
+            from app.tasks.message_task import process_message_task
+
+            process_message_task.apply_async(
+                args=[str(user_message.id)],
+                task_id=task_id,
+                queue='messages',
+                eta=scheduled_at,
+            )
+        except Exception as error:
+            await MessageDao.mark_failed(db, user_message, str(error))
+            await asyncio.to_thread(
+                RedisTaskService.save_state,
+                str(user_message.id),
+                task_id,
+                'failed',
+                str(error),
+            )
+            raise
+        return user_message, None, task_id, True
+
+    @classmethod
+    async def process_message(
+        cls: type['MessageService'],
+        db: AsyncSession,
+        message_id: UUID,
+    ) -> Tuple[Message, Optional[Message], Optional[int]]:
+        message_data = await MessageDao.get_with_chat_boyfriend(db, message_id)
+        if message_data is None:
+            raise LookupError('Message not found')
+        message, chat, boyfriend = message_data
+        user = await UserDao.get_by_id(db, chat.user_id)
+        if message.status == 'cancelled':
+            return message, None, user.telegram_id if user is not None else None
+        assistant = await MessageDao.get_reply(db, message.id)
+        if assistant is not None:
+            return message, assistant, user.telegram_id if user is not None else None
+
+        message.status = 'processing'
+        message.error_message = None
+        await db.commit()
+        await db.refresh(message)
         try:
             history = await MessageDao.list_for_chat(db, chat.id)
             context = MemoryService.select_context(
-                [item for item in history if item.status == 'completed'] + [user_message],
-                content,
+                [item for item in history if item.status == 'completed'] + [message],
+                message.content,
             )
             prompt_messages: List[Dict[str, str]] = [
                 {'role': item.role, 'content': item.content}
@@ -77,22 +123,51 @@ class MessageService:
             ]
             reply_text = await GeminiAIService.generate_reply(boyfriend.system_prompt, prompt_messages)
         except Exception as error:
-            await MessageDao.mark_failed(db, user_message, str(error))
+            await MessageDao.mark_failed(db, message, str(error))
             raise
 
-        assistant_message = await MessageDao.create(
+        assistant = await MessageDao.create(
             db,
             chat.id,
             'assistant',
             reply_text,
-            platform=platform,
+            platform=message.platform,
             message_type='text',
             status='completed',
-            reply_to_message_id=user_message.id,
+            reply_to_message_id=message.id,
         )
         await ChatDao.touch(db, chat.id)
-        user_message, assistant_message = await MessageDao.commit_pair(db, user_message, assistant_message)
-        return user_message, assistant_message, True
+        message, assistant = await MessageDao.commit_pair(db, message, assistant)
+        return message, assistant, user.telegram_id if user is not None else None
+
+    @classmethod
+    async def cancel_message(
+        cls: type['MessageService'],
+        db: AsyncSession,
+        user_id: UUID,
+        chat_id: UUID,
+        message_id: UUID,
+    ) -> Tuple[Message, Optional[str]]:
+        if await ChatDao.get(db, user_id, chat_id) is None:
+            raise LookupError('Chat not found')
+        message = await MessageDao.get_by_id(db, message_id)
+        if message is None or message.chat_id != chat_id or message.role != 'user':
+            raise LookupError('Message not found')
+        task_id = await asyncio.to_thread(RedisTaskService.get_task_id, str(message.id))
+        if message.status in {'queued', 'processing'}:
+            message.status = 'cancelled'
+            await db.commit()
+            if task_id is not None:
+                from app.celery_app import celery_app
+
+                await asyncio.to_thread(celery_app.control.revoke, task_id, terminate=False)
+            await asyncio.to_thread(
+                RedisTaskService.save_state,
+                str(message.id),
+                task_id or '',
+                'cancelled',
+            )
+        return message, task_id
 
     @classmethod
     async def _find_existing(
