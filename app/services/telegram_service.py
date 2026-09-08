@@ -12,8 +12,8 @@ from app.dao.user_dao import UserDao
 from app.clients.http_client import HttpClientFactory
 from app.models.chat import Chat
 from app.security import SecurityService
-from app.services.chat_service import ChatService
 from app.services.account_link_service import AccountLinkService
+from app.services.message_service import MessageService
 from settings import config
 
 
@@ -84,8 +84,23 @@ class TelegramService:
             return
         try:
             chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
-            _, answer = await ChatService.reply_to_message(db, chat.user_id, chat.id, text)
-            await cls.send_message(telegram_chat_id, answer.content, cls._connect_keyboard())
+            update_id = str(update.get('update_id')) if update.get('update_id') is not None else None
+            external_id = (
+                f'{telegram_chat_id}:{message["message_id"]}'
+                if message.get('message_id') is not None
+                else None
+            )
+            _, answer, _, is_new = await MessageService.enqueue_text(
+                db,
+                chat.user_id,
+                chat.id,
+                text,
+                platform='telegram',
+                external_id=external_id,
+                idempotency_key=f'telegram:{update_id}' if update_id is not None else None,
+            )
+            if answer is not None and is_new:
+                await cls.send_message(telegram_chat_id, answer.content, cls._connect_keyboard())
         except Exception:
             await db.rollback()
             await cls.send_message(telegram_chat_id, 'Не получилось ответить. Попробуй еще раз через минуту.', cls._connect_keyboard())

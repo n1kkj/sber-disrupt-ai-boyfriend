@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.boyfriend import Boyfriend
 from app.models.chat import Chat
+from app.models.base_model import Base
 
 
 class ChatDao:
@@ -43,4 +44,9 @@ class ChatDao:
     @classmethod
     async def transfer_to_user(cls: type['ChatDao'], db: AsyncSession, source_user_id: UUID, target_user_id: UUID) -> None:
         await db.execute(sa.update(Chat).where(Chat.user_id == source_user_id).values(user_id=target_user_id))
+        await db.flush()
+
+    @classmethod
+    async def touch(cls: type['ChatDao'], db: AsyncSession, chat_id: UUID) -> None:
+        await db.execute(sa.update(Chat).where(Chat.id == chat_id).values(updated_at=Base.utcnow()))
         await db.flush()

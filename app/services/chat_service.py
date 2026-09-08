@@ -1,26 +1,37 @@
-from typing import Dict, List, Tuple
+from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dao.boyfriend_dao import BoyfriendDao
 from app.dao.chat_dao import ChatDao
 from app.dao.message_dao import MessageDao
+from app.models.boyfriend import Boyfriend
+from app.models.chat import Chat
 from app.models.message import Message
-from app.services.gemini_service import GeminiAIService
-from app.services.memory_service import MemoryService
 
 
 class ChatService:
     @classmethod
-    async def reply_to_message(cls: type['ChatService'], db: AsyncSession, user_id: UUID, chat_id: UUID, content: str) -> Tuple[Message, Message]:
-        chat_boyfriend = await ChatDao.get_with_boyfriend(db, user_id, chat_id)
-        if chat_boyfriend is None:
+    async def create_chat(
+        cls: type['ChatService'],
+        db: AsyncSession,
+        user_id: UUID,
+        boyfriend_id: UUID,
+        title: Optional[str],
+    ) -> Chat:
+        boyfriend = await BoyfriendDao.get_active(db, boyfriend_id)
+        if boyfriend is None:
+            raise LookupError('Boyfriend not found')
+        chat = await ChatDao.create(db, user_id, boyfriend.id, title)
+        return await ChatDao.commit(db, chat)
+
+    @classmethod
+    async def list_chats(cls: type['ChatService'], db: AsyncSession, user_id: UUID) -> List[Chat]:
+        return await ChatDao.list_for_user(db, user_id)
+
+    @classmethod
+    async def list_messages(cls: type['ChatService'], db: AsyncSession, user_id: UUID, chat_id: UUID) -> List[Message]:
+        if await ChatDao.get(db, user_id, chat_id) is None:
             raise LookupError('Chat not found')
-        chat, boyfriend = chat_boyfriend
-        history = await MessageDao.list_for_chat(db, chat.id)
-        user_message = await MessageDao.create(db, chat.id, 'user', content)
-        context = MemoryService.select_context(history + [user_message], content)
-        prompt_messages: List[Dict[str, str]] = [{'role': item.role, 'content': item.content} for item in context]
-        reply = await GeminiAIService.generate_reply(boyfriend.system_prompt, prompt_messages)
-        assistant_message = await MessageDao.create(db, chat.id, 'assistant', reply)
-        return await MessageDao.commit_pair(db, user_message, assistant_message)
+        return await MessageDao.list_for_chat(db, chat_id)

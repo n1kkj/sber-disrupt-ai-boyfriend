@@ -23,6 +23,13 @@ TELEGRAM_MODE=webhook
 TELEGRAM_POLLING_TIMEOUT=25
 TELEGRAM_PROXY_URL=http://user:password@proxy-host:port
 PLATFORM_URL=http://localhost:3000
+REDIS_URL=redis://redis:6379/0
+REDIS_TASK_STATE_TTL_SECONDS=86400
+CELERY_DEFAULT_QUEUE=messages
+CELERY_MAX_RETRIES=3
+CELERY_RETRY_BACKOFF_SECONDS=5
+CELERY_RETRY_BACKOFF_MAX_SECONDS=300
+CELERY_TASK_TIME_LIMIT_SECONDS=180
 ```
 
 Для локального запуска без HTTPS укажите `TELEGRAM_MODE=polling`. Для production с HTTPS используйте `TELEGRAM_MODE=webhook`.
@@ -35,10 +42,23 @@ PLATFORM_URL=http://localhost:3000
 
 ```bash
 docker compose up -d --build
-alembic upgrade head
+docker compose exec app alembic upgrade head
 ```
 
-Основные маршруты: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/me`, `GET /api/v1/boyfriends`, `POST /api/v1/chats`, `POST /api/v1/chats/{chat_id}/messages`, `POST /api/v1/telegram/webhook`.
+Сообщение отправляется в Celery и сразу возвращает `202 Accepted`. Ответ
+worker сохраняет в общую историю. Для повторяемого запроса передавайте
+`X-Idempotency-Key`. Для отложенного сообщения передавайте в JSON
+`scheduled_at` в будущем, например `2026-09-08T18:30:00+03:00`.
+
+Основные маршруты: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`,
+`GET /api/v1/auth/me`, `GET /api/v1/boyfriends`, `POST /api/v1/chats`,
+`POST /api/v1/chats/{chat_id}/messages`,
+`POST /api/v1/chats/{chat_id}/messages/{message_id}/cancel`,
+`POST /api/v1/telegram/webhook`.
+
+Фоновые процессы: `app` обслуживает API, `worker` обрабатывает сообщения,
+`beat` зарезервирован для будущих регулярных задач, Redis хранит broker,
+result backend и состояние отменяемых message tasks.
 
 RAG пока намеренно простой: к последним сообщениям добавляются до восьми исторических сообщений с пересечением слов запроса и текста. Это дешевый MVP-слой, который можно заменить на embeddings/pgvector после появления реальных диалогов.
 

@@ -40,11 +40,28 @@ class TelegramConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='TELEGRAM_', env_file='.env', extra='ignore')
 
 
+class RedisConfig(BaseSettings):
+    url: str = 'redis://redis:6379/0'
+    task_state_ttl_seconds: int = 86400
+    model_config = SettingsConfigDict(env_prefix='REDIS_', env_file='.env', extra='ignore')
+
+
+class CeleryConfig(BaseSettings):
+    default_queue: str = 'messages'
+    max_retries: int = 3
+    retry_backoff_seconds: int = 5
+    retry_backoff_max_seconds: int = 300
+    task_time_limit_seconds: int = 180
+    model_config = SettingsConfigDict(env_prefix='CELERY_', env_file='.env', extra='ignore')
+
+
 class Settings(BaseSettings):
     db: DatabaseConfig = Field(default_factory=DatabaseConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     gemini: GeminiConfig = Field(default_factory=GeminiConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    redis: RedisConfig = Field(default_factory=RedisConfig)
+    celery: CeleryConfig = Field(default_factory=CeleryConfig)
     debug: bool = True
     app_title: str = 'AI boyfriend MVP'
     platform_url: str = 'http://localhost:3000'
