@@ -17,7 +17,7 @@ class ChatDao:
     @classmethod
     async def get_with_boyfriend(cls: type['ChatDao'], db: AsyncSession, user_id: UUID, chat_id: UUID) -> Optional[Tuple[Chat, Boyfriend]]:
         result = await db.execute(sa.select(Chat, Boyfriend).join(Boyfriend, Boyfriend.id == Chat.boyfriend_id).where(Chat.id == chat_id, Chat.user_id == user_id))
-        return result.first()
+        return result.one_or_none()
 
     @classmethod
     async def list_for_user(cls: type['ChatDao'], db: AsyncSession, user_id: UUID) -> List[Chat]:

@@ -27,7 +27,7 @@ class MessageDao:
             .join(Boyfriend, Boyfriend.id == Chat.boyfriend_id)
             .where(Message.id == message_id)
         )
-        return result.first()
+        return result.one_or_none()
 
     @classmethod
     async def list_for_chat(cls: type['MessageDao'], db: AsyncSession, chat_id: UUID) -> List[Message]:
