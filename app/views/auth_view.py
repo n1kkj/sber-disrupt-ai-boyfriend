@@ -5,6 +5,7 @@ from app.database import get_db
 from app.dependencies import current_user
 from app.dto.auth import AuthResponse, LoginRequest, RegisterRequest
 from app.dto.telegram import TelegramClaimRequest, TelegramLinkResponse
+from app.logging import logger
 from app.dto.user import UserResponse
 from app.models.user import User
 from app.services.account_link_service import AccountLinkService
@@ -16,19 +17,25 @@ router = APIRouter(prefix='/auth', tags=['auth'])
 
 @router.post('/register', response_model=AuthResponse, status_code=201)
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    logger.info('auth_register_started')
     try:
         token = await AuthService.register(db, str(payload.email).lower(), payload.password, payload.display_name)
     except ValueError as error:
+        logger.warning('auth_register_rejected reason=%s', error)
         raise HTTPException(status_code=409, detail=str(error))
+    logger.info('auth_register_completed')
     return AuthResponse(access_token=token)
 
 
 @router.post('/login', response_model=AuthResponse)
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    logger.info('auth_login_started')
     try:
         token = await AuthService.login(db, str(payload.email).lower(), payload.password)
     except ValueError as error:
+        logger.warning('auth_login_rejected reason=%s', error)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error))
+    logger.info('auth_login_completed')
     return AuthResponse(access_token=token)
 
 
@@ -39,16 +46,21 @@ async def me(user: User = Depends(current_user)) -> UserResponse:
 
 @router.post('/telegram/link', response_model=TelegramLinkResponse)
 async def create_telegram_link(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> TelegramLinkResponse:
+    logger.info('auth_telegram_link_started user_id=%s', user.id)
     if not config.telegram.bot_username:
         raise HTTPException(status_code=503, detail='TELEGRAM_BOT_USERNAME is not configured')
     token, expires_at = await AccountLinkService.create_for_user(db, user.id)
+    logger.info('auth_telegram_link_completed user_id=%s', user.id)
     return TelegramLinkResponse(url=f'https://t.me/{config.telegram.bot_username}?start=link_{token}', expires_at=expires_at)
 
 
 @router.post('/telegram/claim', response_model=UserResponse)
 async def claim_telegram_link(payload: TelegramClaimRequest, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> UserResponse:
+    logger.info('auth_telegram_claim_started user_id=%s', user.id)
     try:
         linked_user = await AccountLinkService.claim_by_user(db, payload.token, user.id)
     except ValueError as error:
+        logger.warning('auth_telegram_claim_rejected user_id=%s reason=%s', user.id, error)
         raise HTTPException(status_code=400, detail=str(error))
+    logger.info('auth_telegram_claim_completed user_id=%s', user.id)
     return UserResponse.model_validate(linked_user)

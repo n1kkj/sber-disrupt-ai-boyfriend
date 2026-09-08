@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from fastapi import Request
 
+from app.logging import logger
 from settings import config
 
 async_engine = create_async_engine(
@@ -18,5 +19,12 @@ async_session = sessionmaker(
 
 
 async def get_db(request: Request) -> AsyncSession:
-    async with request.app.state.db() as session:
-        yield session
+    logger.debug('database_session_opened')
+    try:
+        async with request.app.state.db() as session:
+            yield session
+    except Exception:
+        logger.exception('database_session_failed')
+        raise
+    finally:
+        logger.debug('database_session_closed')

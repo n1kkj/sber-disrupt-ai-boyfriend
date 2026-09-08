@@ -55,6 +55,14 @@ class CeleryConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='CELERY_', env_file='.env', extra='ignore')
 
 
+class LoggingConfig(BaseSettings):
+    level: str = 'INFO'
+    file_path: str = 'logs/app.log'
+    max_bytes: int = 10_000_000
+    backup_count: int = 5
+    model_config = SettingsConfigDict(env_prefix='LOG_', env_file='.env', extra='ignore')
+
+
 class Settings(BaseSettings):
     db: DatabaseConfig = Field(default_factory=DatabaseConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
@@ -62,6 +70,7 @@ class Settings(BaseSettings):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     debug: bool = True
     app_title: str = 'AI boyfriend MVP'
     platform_url: str = 'http://localhost:3000'

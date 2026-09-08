@@ -30,6 +30,10 @@ CELERY_MAX_RETRIES=3
 CELERY_RETRY_BACKOFF_SECONDS=5
 CELERY_RETRY_BACKOFF_MAX_SECONDS=300
 CELERY_TASK_TIME_LIMIT_SECONDS=180
+LOG_LEVEL=INFO
+LOG_FILE_PATH=logs/app.log
+LOG_MAX_BYTES=10000000
+LOG_BACKUP_COUNT=5
 ```
 
 Для локального запуска без HTTPS укажите `TELEGRAM_MODE=polling`. Для production с HTTPS используйте `TELEGRAM_MODE=webhook`.
@@ -59,6 +63,10 @@ worker сохраняет в общую историю. Для повторяе�
 Фоновые процессы: `app` обслуживает API, `worker` обрабатывает сообщения,
 `beat` зарезервирован для будущих регулярных задач, Redis хранит broker,
 result backend и состояние отменяемых message tasks.
+
+Логирование единое для API, Telegram и Celery: записи идут в консоль и в
+`logs/app.log` с ротацией файла. В логах нет паролей, токенов и полного текста
+сообщений.
 
 RAG пока намеренно простой: к последним сообщениям добавляются до восьми исторических сообщений с пересечением слов запроса и текста. Это дешевый MVP-слой, который можно заменить на embeddings/pgvector после появления реальных диалогов.
 

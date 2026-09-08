@@ -3,6 +3,7 @@ from typing import Dict, Optional
 
 from redis import Redis
 
+from app.logging import logger
 from settings import config
 
 
@@ -25,6 +26,10 @@ class RedisTaskService:
                 config.redis.task_state_ttl_seconds,
                 json.dumps(payload),
             )
+            logger.debug('redis_task_state_saved message_id=%s task_id=%s status=%s', message_id, task_id, status)
+        except Exception:
+            logger.exception('redis_task_state_save_failed message_id=%s task_id=%s status=%s', message_id, task_id, status)
+            raise
         finally:
             client.close()
 
@@ -36,8 +41,11 @@ class RedisTaskService:
         finally:
             client.close()
         if value is None:
+            logger.debug('redis_task_state_missing message_id=%s', message_id)
             return None
-        return json.loads(value)
+        state = json.loads(value)
+        logger.debug('redis_task_state_loaded message_id=%s status=%s', message_id, state.get('status'))
+        return state
 
     @classmethod
     def get_task_id(cls: type['RedisTaskService'], message_id: str) -> Optional[str]:

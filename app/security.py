@@ -8,6 +8,7 @@ import jwt
 from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
 
+from app.logging import logger
 from settings import config
 
 
@@ -24,8 +25,12 @@ class SecurityService:
             try:
                 return cls.password_hash.verify(password, encoded)
             except (ValueError, TypeError):
+                logger.warning('password_verification_failed reason=invalid_argon2_hash')
                 return False
-        return cls._verify_legacy_password(password, encoded)
+        result = cls._verify_legacy_password(password, encoded)
+        if not result:
+            logger.warning('password_verification_failed reason=invalid_legacy_hash')
+        return result
 
     @classmethod
     def needs_password_rehash(cls: type['SecurityService'], encoded: str) -> bool:
@@ -55,7 +60,9 @@ class SecurityService:
         try:
             payload = jwt.decode(token, config.auth.secret, algorithms=['HS256'])
         except InvalidTokenError as error:
+            logger.warning('access_token_decode_failed')
             raise ValueError('invalid token') from error
         if not payload.get('sub'):
+            logger.warning('access_token_decode_failed reason=subject_missing')
             raise ValueError('invalid token')
         return payload

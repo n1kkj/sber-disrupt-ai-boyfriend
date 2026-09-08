@@ -12,12 +12,14 @@ from app.dao.user_dao import UserDao
 from app.models.telegram_link_token import TelegramLinkToken
 from app.models.user import User
 from app.models.base_model import Base
+from app.logging import logger
 from settings import config
 
 
 class AccountLinkService:
     @classmethod
     async def create_for_user(cls: type['AccountLinkService'], db: AsyncSession, user_id: UUID) -> Tuple[str, datetime]:
+        logger.info('account_link_token_created_for_user user_id=%s', user_id)
         raw_token = secrets.token_urlsafe(32)
         expires_at = Base.utcnow() + timedelta(minutes=config.telegram.link_token_ttl_minutes)
         token = await TelegramLinkTokenDao.create(db, cls._hash_token(raw_token), expires_at, user_id=user_id)
@@ -26,6 +28,7 @@ class AccountLinkService:
 
     @classmethod
     async def create_for_telegram(cls: type['AccountLinkService'], db: AsyncSession, telegram_id: int) -> Tuple[str, datetime]:
+        logger.info('account_link_token_created_for_telegram chat_suffix=%s', str(telegram_id)[-4:])
         raw_token = secrets.token_urlsafe(32)
         expires_at = Base.utcnow() + timedelta(minutes=config.telegram.link_token_ttl_minutes)
         token = await TelegramLinkTokenDao.create(db, cls._hash_token(raw_token), expires_at, telegram_id=telegram_id)
@@ -34,6 +37,7 @@ class AccountLinkService:
 
     @classmethod
     async def claim_by_telegram(cls: type['AccountLinkService'], db: AsyncSession, raw_token: str, telegram_id: int) -> User:
+        logger.info('account_link_claim_by_telegram_started chat_suffix=%s', str(telegram_id)[-4:])
         token = await cls._get_token(db, raw_token)
         if token.user_id is None or token.telegram_id is not None:
             raise ValueError('Invalid website linking token')
@@ -43,10 +47,12 @@ class AccountLinkService:
         await cls._attach_telegram_user(db, user, telegram_id)
         token.used_at = Base.utcnow()
         await TelegramLinkTokenDao.commit(db, token)
+        logger.info('account_link_claim_by_telegram_completed user_id=%s', user.id)
         return user
 
     @classmethod
     async def claim_by_user(cls: type['AccountLinkService'], db: AsyncSession, raw_token: str, user_id: UUID) -> User:
+        logger.info('account_link_claim_by_user_started user_id=%s', user_id)
         token = await cls._get_token(db, raw_token)
         if token.telegram_id is None or token.user_id is not None:
             raise ValueError('Invalid Telegram linking token')
@@ -56,6 +62,7 @@ class AccountLinkService:
         await cls._attach_telegram_user(db, user, token.telegram_id)
         token.used_at = Base.utcnow()
         await TelegramLinkTokenDao.commit(db, token)
+        logger.info('account_link_claim_by_user_completed user_id=%s', user.id)
         return user
 
     @classmethod

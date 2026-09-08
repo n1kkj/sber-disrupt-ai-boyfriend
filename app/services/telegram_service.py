@@ -10,6 +10,7 @@ from app.dao.boyfriend_dao import BoyfriendDao
 from app.dao.chat_dao import ChatDao
 from app.dao.user_dao import UserDao
 from app.clients.http_client import HttpClientFactory
+from app.logging import logger
 from app.models.chat import Chat
 from app.security import SecurityService
 from app.services.account_link_service import AccountLinkService
@@ -35,8 +36,15 @@ class TelegramService:
     @classmethod
     async def send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
         if not config.telegram.bot_token:
+            logger.warning('telegram_send_skipped reason=bot_token_missing')
             return
-        await asyncio.to_thread(cls._send_message, chat_id, text, reply_markup)
+        logger.info('telegram_send_started chat_suffix=%s text_chars=%s', str(chat_id)[-4:], len(text))
+        try:
+            await asyncio.to_thread(cls._send_message, chat_id, text, reply_markup)
+        except Exception:
+            logger.exception('telegram_send_failed chat_suffix=%s', str(chat_id)[-4:])
+            raise
+        logger.info('telegram_send_completed chat_suffix=%s', str(chat_id)[-4:])
 
     @classmethod
     def _send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> None:
@@ -49,18 +57,32 @@ class TelegramService:
     async def set_webhook(cls: type['TelegramService'], webhook_url: str) -> None:
         if not config.telegram.bot_token:
             raise RuntimeError('TELEGRAM_BOT_TOKEN is not configured')
-        await asyncio.to_thread(cls._set_webhook, webhook_url)
+        logger.info('telegram_webhook_set_started')
+        try:
+            await asyncio.to_thread(cls._set_webhook, webhook_url)
+        except Exception:
+            logger.exception('telegram_webhook_set_failed')
+            raise
+        logger.info('telegram_webhook_set_completed')
 
     @classmethod
     async def delete_webhook(cls: type['TelegramService']) -> None:
         if not config.telegram.bot_token:
             raise RuntimeError('TELEGRAM_BOT_TOKEN is not configured')
-        await asyncio.to_thread(cls._delete_webhook)
+        logger.info('telegram_webhook_delete_started')
+        try:
+            await asyncio.to_thread(cls._delete_webhook)
+        except Exception:
+            logger.exception('telegram_webhook_delete_failed')
+            raise
+        logger.info('telegram_webhook_delete_completed')
 
     @classmethod
     async def process_update(cls: type['TelegramService'], db: AsyncSession, update: Dict[str, Any]) -> None:
+        logger.info('telegram_update_received update_id=%s', update.get('update_id'))
         message = update.get('message') or update.get('edited_message')
         if not message or not message.get('text') or not message.get('chat', {}).get('id'):
+            logger.debug('telegram_update_ignored reason=unsupported_payload')
             return
         telegram_chat_id = int(message['chat']['id'])
         telegram_user = message.get('from', {})
@@ -71,13 +93,16 @@ class TelegramService:
             if payload.startswith('link_'):
                 try:
                     await AccountLinkService.claim_by_telegram(db, payload.removeprefix('link_'), telegram_chat_id)
+                    logger.info('telegram_account_link_completed chat_suffix=%s', str(telegram_chat_id)[-4:])
                     await cls.send_message(telegram_chat_id, 'Telegram подключен к аккаунту платформы.', cls._connect_keyboard())
                 except ValueError as error:
+                    logger.warning('telegram_account_link_rejected chat_suffix=%s reason=%s', str(telegram_chat_id)[-4:], error)
                     await cls.send_message(telegram_chat_id, str(error), cls._connect_keyboard())
                 return
             await cls.send_message(telegram_chat_id, 'Привет! Я рядом. Нажми кнопку, чтобы подключить Telegram к платформе.', cls._connect_keyboard())
             return
         if text == 'Подключиться к платформе':
+            logger.info('telegram_account_link_requested chat_suffix=%s', str(telegram_chat_id)[-4:])
             raw_token, expires_at = await AccountLinkService.create_for_telegram(db, telegram_chat_id)
             platform_url = f'{config.platform_url.rstrip("/")}/?telegram_link={raw_token}'
             await cls.send_message(telegram_chat_id, f'Открой ссылку и войди или зарегистрируйся на платформе. Ссылка действует до {expires_at:%H:%M}.\n\n{platform_url}', cls._connect_keyboard())
@@ -102,6 +127,7 @@ class TelegramService:
             if answer is not None and is_new:
                 await cls.send_message(telegram_chat_id, answer.content, cls._connect_keyboard())
         except Exception:
+            logger.exception('telegram_update_processing_failed chat_suffix=%s update_id=%s', str(telegram_chat_id)[-4:], update.get('update_id'))
             await db.rollback()
             await cls.send_message(telegram_chat_id, 'Не получилось ответить. Попробуй еще раз через минуту.', cls._connect_keyboard())
 
@@ -113,6 +139,7 @@ class TelegramService:
     async def polling_loop(cls: type['TelegramService'], session_factory: async_sessionmaker, stop_event: asyncio.Event) -> None:
         offset = 0
         webhook_deleted = False
+        logger.info('telegram_polling_loop_started')
         while not stop_event.is_set():
             try:
                 if not webhook_deleted:
@@ -124,9 +151,12 @@ class TelegramService:
                     async with session_factory() as session:
                         await cls.process_update(session, update)
             except asyncio.CancelledError:
+                logger.info('telegram_polling_loop_cancelled')
                 raise
             except Exception:
+                logger.exception('telegram_polling_loop_failed offset=%s', offset)
                 await asyncio.sleep(3)
+        logger.info('telegram_polling_loop_finished')
 
     @classmethod
     def _set_webhook(cls: type['TelegramService'], webhook_url: str) -> None:

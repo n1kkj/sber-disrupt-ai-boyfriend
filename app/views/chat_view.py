@@ -9,6 +9,7 @@ from app.dependencies import current_user
 from app.dto.boyfriend import BoyfriendResponse
 from app.dto.chat import ChatCreateRequest, ChatResponse
 from app.dto.message import MessageRequest, MessageResponse, MessageTaskResponse
+from app.logging import logger
 from app.models.boyfriend import Boyfriend
 from app.models.chat import Chat
 from app.models.message import Message
@@ -27,10 +28,14 @@ async def list_boyfriends(db: AsyncSession = Depends(get_db)) -> List[Boyfriend]
 
 @router.post('/chats', response_model=ChatResponse, status_code=201)
 async def create_chat(payload: ChatCreateRequest, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> Chat:
+    logger.info('chat_create_started user_id=%s boyfriend_id=%s', user.id, payload.boyfriend_id)
     try:
-        return await ChatService.create_chat(db, user.id, payload.boyfriend_id, payload.title)
+        chat = await ChatService.create_chat(db, user.id, payload.boyfriend_id, payload.title)
     except LookupError as error:
+        logger.warning('chat_create_rejected user_id=%s reason=%s', user.id, error)
         raise HTTPException(status_code=404, detail=str(error))
+    logger.info('chat_create_completed user_id=%s chat_id=%s', user.id, chat.id)
+    return chat
 
 
 @router.get('/chats', response_model=List[ChatResponse])
@@ -54,6 +59,7 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
     x_idempotency_key: Optional[str] = Header(default=None),
 ) -> MessageTaskResponse:
+    logger.info('chat_message_request_started user_id=%s chat_id=%s', user.id, chat_id)
     try:
         user_message, assistant_message, task_id, _ = await MessageService.enqueue_text(
             db,
@@ -65,11 +71,15 @@ async def send_message(
             scheduled_at=payload.scheduled_at,
         )
     except LookupError as error:
+        logger.warning('chat_message_request_rejected chat_id=%s reason=%s', chat_id, error)
         raise HTTPException(status_code=404, detail=str(error))
     except RuntimeError as error:
+        logger.error('chat_message_dispatch_failed chat_id=%s reason=%s', chat_id, error)
         raise HTTPException(status_code=409, detail=str(error))
     except ValueError as error:
+        logger.warning('chat_message_request_invalid chat_id=%s reason=%s', chat_id, error)
         raise HTTPException(status_code=400, detail=str(error))
+    logger.info('chat_message_request_accepted message_id=%s task_id=%s', user_message.id, task_id)
     return MessageTaskResponse(
         message=user_message,
         task_id=task_id,
@@ -84,8 +94,11 @@ async def cancel_message(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MessageTaskResponse:
+    logger.info('chat_message_cancel_started user_id=%s chat_id=%s message_id=%s', user.id, chat_id, message_id)
     try:
         message, task_id = await MessageService.cancel_message(db, user.id, chat_id, message_id)
     except LookupError as error:
+        logger.warning('chat_message_cancel_rejected message_id=%s reason=%s', message_id, error)
         raise HTTPException(status_code=404, detail=str(error))
+    logger.info('chat_message_cancel_completed message_id=%s task_id=%s status=%s', message_id, task_id, message.status)
     return MessageTaskResponse(message=message, task_id=task_id, task_status=message.status)

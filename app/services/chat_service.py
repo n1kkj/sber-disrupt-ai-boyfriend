@@ -9,6 +9,7 @@ from app.dao.message_dao import MessageDao
 from app.models.boyfriend import Boyfriend
 from app.models.chat import Chat
 from app.models.message import Message
+from app.logging import logger
 
 
 class ChatService:
@@ -22,9 +23,12 @@ class ChatService:
     ) -> Chat:
         boyfriend = await BoyfriendDao.get_active(db, boyfriend_id)
         if boyfriend is None:
+            logger.warning('chat_service_boyfriend_not_found boyfriend_id=%s', boyfriend_id)
             raise LookupError('Boyfriend not found')
         chat = await ChatDao.create(db, user_id, boyfriend.id, title)
-        return await ChatDao.commit(db, chat)
+        chat = await ChatDao.commit(db, chat)
+        logger.info('chat_service_created chat_id=%s user_id=%s', chat.id, user_id)
+        return chat
 
     @classmethod
     async def list_chats(cls: type['ChatService'], db: AsyncSession, user_id: UUID) -> List[Chat]:
