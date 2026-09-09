@@ -37,3 +37,8 @@ archive.zip
 
 .codspeed
 
+celerybeat-schedule
+celerybeat-schedule-shm
+celerybeat-schedule-wal
+
+/.idea
