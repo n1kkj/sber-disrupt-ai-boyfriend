@@ -10,6 +10,8 @@ from app.dao.boyfriend_dao import BoyfriendDao
 from app.dao.chat_dao import ChatDao
 from app.dao.telegram_link_token_dao import TelegramLinkTokenDao
 from app.dao.user_dao import UserDao
+from app.dao.onboarding_dao import OnboardingDao
+from app.dao.user_profile_dao import UserProfileDao
 from app.models.telegram_link_token import TelegramLinkToken
 from app.models.user import User
 from app.models.base_model import Base
@@ -84,6 +86,8 @@ class AccountLinkService:
             await ChatDao.transfer_to_user(db, source_user.id, target_user.id)
             await UserDao.delete(db, source_user)
         await UserDao.set_telegram_id(db, target_user, telegram_id)
+        await UserProfileDao.ensure(db, target_user.id)
+        await OnboardingDao.ensure(db, target_user.id)
         boyfriend = await BoyfriendDao.get_first_active(db)
         if boyfriend is None:
             raise RuntimeError('No active companion configured')

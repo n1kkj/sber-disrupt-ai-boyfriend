@@ -6,11 +6,14 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dao.chat_dao import ChatDao
+from app.dao.character_version_dao import CharacterVersionDao
 from app.dao.message_dao import MessageDao
+from app.dao.user_profile_dao import UserProfileDao
 from app.dao.user_dao import UserDao
 from app.logging import logger
 from app.models.message import Message
 from app.services.gemini_service import GeminiAIService
+from app.services.gender_addressing_service import GenderAndAddressingService
 from app.services.memory_service import MemoryService
 from app.services.redis_task_service import RedisTaskService
 
@@ -121,6 +124,10 @@ class MessageService:
             raise LookupError('Message not found')
         message, chat, boyfriend = message_data
         user = await UserDao.get_by_id(db, chat.user_id)
+        profile = await UserProfileDao.ensure(db, chat.user_id)
+        character = await CharacterVersionDao.get_active(db, boyfriend.id)
+        if character is None:
+            character = await CharacterVersionDao.ensure_default(db, boyfriend.id, boyfriend.name, boyfriend.system_prompt)
         telegram_id = user.telegram_id if message.platform == 'telegram' and user is not None else None
         telegram_connected = user is not None and not user.is_telegram_only
         if message.status == 'cancelled':
@@ -146,7 +153,8 @@ class MessageService:
                 for item in context
                 if item.role in {'user', 'assistant'}
             ]
-            reply_text = await GeminiAIService.generate_reply(boyfriend.system_prompt, prompt_messages)
+            system_prompt = character.system_prompt + GenderAndAddressingService.build_context(profile, character)
+            reply_text = await GeminiAIService.generate_reply(system_prompt, prompt_messages)
         except Exception as error:
             logger.exception('message_ai_processing_failed message_id=%s', message_id)
             await MessageDao.mark_failed(db, message, str(error))

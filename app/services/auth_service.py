@@ -3,6 +3,8 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dao.user_dao import UserDao
+from app.dao.onboarding_dao import OnboardingDao
+from app.dao.user_profile_dao import UserProfileDao
 from app.logging import logger
 from app.security import SecurityService
 
@@ -16,6 +18,8 @@ class AuthService:
             logger.warning('auth_service_register_duplicate')
             raise ValueError('Email already registered')
         user = await UserDao.create(db, normalized_email, SecurityService.hash_password(password), display_name)
+        await UserProfileDao.ensure(db, user.id)
+        await OnboardingDao.ensure(db, user.id)
         await UserDao.commit(db, user)
         logger.info('auth_service_register_completed user_id=%s', user.id)
         return SecurityService.create_access_token(str(user.id))

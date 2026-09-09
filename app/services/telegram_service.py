@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.dao.boyfriend_dao import BoyfriendDao
 from app.dao.chat_dao import ChatDao
 from app.dao.user_dao import UserDao
+from app.dao.onboarding_dao import OnboardingDao
+from app.dao.user_profile_dao import UserProfileDao
 from app.clients.http_client import HttpClientFactory
 from app.logging import logger
 from app.models.chat import Chat
@@ -16,6 +18,7 @@ from app.models.user import User
 from app.security import SecurityService
 from app.services.account_link_service import AccountLinkService
 from app.services.message_service import MessageService
+from app.services.onboarding_service import OnboardingService
 from app.services.rate_limit_service import RateLimitService
 from settings import config
 
@@ -33,6 +36,9 @@ class TelegramService:
                 telegram_id,
                 True,
             )
+            await UserProfileDao.ensure(db, user.id)
+            await OnboardingDao.ensure(db, user.id)
+            await db.commit()
             logger.info('telegram_only_user_created chat_suffix=%s', str(telegram_id)[-4:])
         chat = await ChatDao.get_for_platform(db, user.id, 'telegram')
         if chat is not None:
@@ -112,9 +118,14 @@ class TelegramService:
                     await cls.send_message(telegram_chat_id, str(error), cls._connect_keyboard(is_platform_connected))
                 return
             if is_platform_connected:
-                await cls.send_message(telegram_chat_id, 'Привет! Я рядом.', cls._connect_keyboard(True))
+                chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
+                onboarding = await OnboardingService.start(db, chat.user_id)
+                greeting = 'Привет! Я рядом.'
+                await cls.send_message(telegram_chat_id, f'{greeting}\n\n{onboarding.question or "Онбординг завершен."}', cls._connect_keyboard(True))
             else:
-                await cls.send_message(telegram_chat_id, 'Привет! Я рядом. Нажми кнопку, чтобы подключить Telegram к платформе.', cls._connect_keyboard(False))
+                chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
+                onboarding = await OnboardingService.start(db, chat.user_id)
+                await cls.send_message(telegram_chat_id, f'Привет! Я рядом.\n\n{onboarding.question or "Нажми кнопку, чтобы подключить Telegram к платформе."}', cls._connect_keyboard(False))
             return
         if text == 'Подключиться к платформе':
             if is_platform_connected:
@@ -141,6 +152,15 @@ class TelegramService:
                 )
                 return
             chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
+            onboarding = await OnboardingService.start(db, chat.user_id)
+            if onboarding.status != 'completed':
+                onboarding = await OnboardingService.answer(db, chat.user_id, text)
+                await cls.send_message(
+                    telegram_chat_id,
+                    onboarding.question or 'Онбординг завершен. Теперь можно общаться.',
+                    cls._connect_keyboard(is_platform_connected),
+                )
+                return
             update_id = str(update.get('update_id')) if update.get('update_id') is not None else None
             external_id = (
                 f'{telegram_chat_id}:{message["message_id"]}'

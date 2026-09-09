@@ -26,7 +26,7 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.models import base_model
-from app.models import boyfriend, chat, media_asset, message, telegram_link_token, user
+from app.models import boyfriend, character_version, chat, media_asset, message, onboarding_state, telegram_link_token, user, user_profile
 
 target_metadata = base_model.Base.metadata
 

@@ -9,10 +9,18 @@ from settings import config
 
 class GeminiAIService:
     @classmethod
+    def _validate_models(cls: type['GeminiAIService']) -> None:
+        if config.gemini.model.startswith('gemini-embedding-'):
+            raise ValueError('GEMINI_MODEL должен быть чат-моделью, а не embedding-моделью.')
+        if config.gemini.embedding_model != 'gemini-embedding-001':
+            raise ValueError('Для Gemini embeddings используйте GEMINI_EMBEDDING_MODEL=gemini-embedding-001.')
+
+    @classmethod
     def get_chat_model(cls: type['GeminiAIService'], temperature: float = 0) -> ChatOpenAI:
         if not config.gemini.api_key:
             logger.error('gemini_chat_model_creation_failed reason=api_key_missing')
             raise ValueError('Не задан GEMINI_API_KEY для провайдера gemini.')
+        cls._validate_models()
         return ChatOpenAI(
             model=config.gemini.model,
             api_key=config.gemini.api_key,
@@ -26,6 +34,7 @@ class GeminiAIService:
         if not config.gemini.api_key:
             logger.error('gemini_embeddings_creation_failed reason=api_key_missing')
             raise ValueError('Не задан GEMINI_API_KEY для провайдера gemini.')
+        cls._validate_models()
         return OpenAIEmbeddings(
             model=config.gemini.embedding_model,
             api_key=config.gemini.api_key,
