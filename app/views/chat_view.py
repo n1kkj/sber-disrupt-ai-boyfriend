@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Optional
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from app.models.user import User
 from app.services.boyfriend_service import BoyfriendService
 from app.services.chat_service import ChatService
 from app.services.message_service import MessageService
+from app.services.rate_limit_service import RateLimitService
 
 router = APIRouter(tags=['chat'])
 
@@ -60,6 +62,18 @@ async def send_message(
     x_idempotency_key: Optional[str] = Header(default=None),
 ) -> MessageTaskResponse:
     logger.info('chat_message_request_started user_id=%s chat_id=%s', user.id, chat_id)
+    allowed, retry_after = await asyncio.to_thread(
+        RateLimitService.consume,
+        'web',
+        str(user.id),
+    )
+    if not allowed:
+        logger.warning('chat_message_rate_limited user_id=%s retry_after=%s', user.id, retry_after)
+        raise HTTPException(
+            status_code=429,
+            detail='Слишком много сообщений. Попробуйте позже.',
+            headers={'Retry-After': str(retry_after)},
+        )
     try:
         user_message, assistant_message, task_id, _ = await MessageService.enqueue_text(
             db,

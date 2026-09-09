@@ -63,6 +63,12 @@ class LoggingConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='LOG_', env_file='.env', extra='ignore')
 
 
+class RateLimitConfig(BaseSettings):
+    max_messages: int = 20
+    window_seconds: int = 60
+    model_config = SettingsConfigDict(env_prefix='RATE_LIMIT_', env_file='.env', extra='ignore')
+
+
 class Settings(BaseSettings):
     db: DatabaseConfig = Field(default_factory=DatabaseConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
@@ -71,6 +77,7 @@ class Settings(BaseSettings):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     debug: bool = True
     app_title: str = 'AI boyfriend MVP'
     platform_url: str = 'http://localhost:3000'

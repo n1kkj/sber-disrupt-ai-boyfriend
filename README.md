@@ -34,6 +34,8 @@ LOG_LEVEL=INFO
 LOG_FILE_PATH=logs/app.log
 LOG_MAX_BYTES=10000000
 LOG_BACKUP_COUNT=5
+RATE_LIMIT_MAX_MESSAGES=20
+RATE_LIMIT_WINDOW_SECONDS=60
 ```
 
 Для локального запуска без HTTPS укажите `TELEGRAM_MODE=polling`. Для production с HTTPS используйте `TELEGRAM_MODE=webhook`.
@@ -68,6 +70,9 @@ result backend и состояние отменяемых message tasks.
 При связывании аккаунтов оба чата создаются автоматически, а ответ Celery
 доставляется только в тот канал, из которого пришло исходное сообщение.
 Кнопка подключения в Telegram показывается только до связывания аккаунта.
+
+Для входящих сообщений действует Redis rate limit: по умолчанию 20 сообщений
+за 60 секунд на web-пользователя и Telegram-чат.
 
 Логирование единое для API, Telegram и Celery: записи идут в консоль и в
 `logs/app.log` с ротацией файла. В логах нет паролей, токенов и полного текста

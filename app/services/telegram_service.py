@@ -16,6 +16,7 @@ from app.models.user import User
 from app.security import SecurityService
 from app.services.account_link_service import AccountLinkService
 from app.services.message_service import MessageService
+from app.services.rate_limit_service import RateLimitService
 from settings import config
 
 
@@ -126,6 +127,19 @@ class TelegramService:
             await cls.send_message(telegram_chat_id, f'Открой ссылку и войди или зарегистрируйся на платформе. Ссылка действует до {expires_at:%H:%M}.\n\n{platform_url}', cls._connect_keyboard(False))
             return
         try:
+            allowed, retry_after = await asyncio.to_thread(
+                RateLimitService.consume,
+                'telegram',
+                str(telegram_chat_id),
+            )
+            if not allowed:
+                logger.warning('telegram_message_rate_limited chat_suffix=%s retry_after=%s', str(telegram_chat_id)[-4:], retry_after)
+                await cls.send_message(
+                    telegram_chat_id,
+                    'Слишком много сообщений подряд. Попробуй позже.',
+                    cls._connect_keyboard(is_platform_connected),
+                )
+                return
             chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
             update_id = str(update.get('update_id')) if update.get('update_id') is not None else None
             external_id = (
