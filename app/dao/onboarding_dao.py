@@ -49,3 +49,27 @@ class OnboardingDao:
         state.completed_at = completed_at
         await db.flush()
         return state
+
+    @classmethod
+    async def merge_more_complete(
+        cls: type['OnboardingDao'],
+        db: AsyncSession,
+        target: OnboardingState,
+        source: OnboardingState,
+    ) -> bool:
+        source_score = cls._score(source)
+        target_score = cls._score(target)
+        if source_score <= target_score:
+            return False
+        target.status = source.status
+        target.step = source.step
+        target.answers = dict(source.answers)
+        target.completed_at = source.completed_at
+        await db.flush()
+        return True
+
+    @classmethod
+    def _score(cls: type['OnboardingDao'], state: OnboardingState) -> int:
+        if state.status == 'completed':
+            return 1000
+        return len(state.answers)

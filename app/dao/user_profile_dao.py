@@ -74,3 +74,24 @@ class UserProfileDao:
         profile.companion_role = 'girlfriend' if normalized_gender == 'female' else 'boyfriend'
         await db.flush()
         return profile
+
+    @classmethod
+    async def copy_preferences(
+        cls: type['UserProfileDao'],
+        db: AsyncSession,
+        target: UserProfile,
+        source: UserProfile,
+    ) -> UserProfile:
+        target.companion_role = source.companion_role
+        target.companion_gender = source.companion_gender
+        target.user_gender = source.user_gender
+        target.user_pronouns = source.user_pronouns
+        target.preferred_address = source.preferred_address
+        target.language = source.language
+        target.timezone = source.timezone
+        target.quiet_hours_start = source.quiet_hours_start
+        target.quiet_hours_end = source.quiet_hours_end
+        target.proactive_enabled = source.proactive_enabled
+        target.daily_proactive_limit = source.daily_proactive_limit
+        await db.flush()
+        return target

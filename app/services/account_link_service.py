@@ -79,10 +79,26 @@ class AccountLinkService:
     async def _attach_telegram_user(cls: type['AccountLinkService'], db: AsyncSession, target_user: User, telegram_id: int) -> None:
         if target_user.telegram_id is not None and target_user.telegram_id != telegram_id:
             raise ValueError('Website account is already linked to another Telegram account')
+        target_profile = await UserProfileDao.ensure(db, target_user.id)
         source_user = await UserDao.get_by_telegram_id(db, telegram_id)
         if source_user is not None and source_user.id != target_user.id:
             if target_user.telegram_id is not None:
                 raise ValueError('Telegram account is already linked to another website account')
+            source_profile = await UserProfileDao.ensure(db, source_user.id)
+            source_onboarding = await OnboardingDao.ensure(db, source_user.id)
+            target_onboarding = await OnboardingDao.ensure(db, target_user.id)
+            source_selected = await OnboardingDao.merge_more_complete(
+                db,
+                target_onboarding,
+                source_onboarding,
+            )
+            if source_selected:
+                await UserProfileDao.copy_preferences(db, target_profile, source_profile)
+                logger.info(
+                    'account_link_onboarding_merged source_user_id=%s target_user_id=%s source_selected=true',
+                    source_user.id,
+                    target_user.id,
+                )
             await ChatDao.transfer_to_user(db, source_user.id, target_user.id)
             await UserDao.delete(db, source_user)
         await UserDao.set_telegram_id(db, target_user, telegram_id)
@@ -93,6 +109,11 @@ class AccountLinkService:
             raise RuntimeError('No active companion configured')
         await ChatDao.ensure_for_platform(db, target_user.id, boyfriend.id, 'web', 'Web chat')
         await ChatDao.ensure_for_platform(db, target_user.id, boyfriend.id, 'telegram', 'Telegram chat')
+        selected_boyfriend = await BoyfriendDao.get_for_gender(db, target_profile.companion_gender)
+        if selected_boyfriend is not None:
+            chats = await ChatDao.list_for_user(db, target_user.id)
+            for chat in chats:
+                await ChatDao.set_boyfriend(db, chat, selected_boyfriend.id)
         logger.info('account_link_platform_chats_ready user_id=%s', target_user.id)
 
     @classmethod
