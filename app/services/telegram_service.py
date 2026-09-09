@@ -154,7 +154,21 @@ class TelegramService:
             chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
             onboarding = await OnboardingService.start(db, chat.user_id)
             if onboarding.status != 'completed':
-                onboarding = await OnboardingService.answer(db, chat.user_id, text)
+                try:
+                    onboarding = await OnboardingService.answer(db, chat.user_id, text)
+                except ValueError as error:
+                    logger.info(
+                        'telegram_onboarding_answer_invalid chat_suffix=%s step=%s reason=%s',
+                        str(telegram_chat_id)[-4:],
+                        onboarding.step,
+                        error,
+                    )
+                    await cls.send_message(
+                        telegram_chat_id,
+                        f'{error}\n\n{onboarding.question}',
+                        cls._connect_keyboard(is_platform_connected),
+                    )
+                    return
                 await cls.send_message(
                     telegram_chat_id,
                     onboarding.question or 'Онбординг завершен. Теперь можно общаться.',
