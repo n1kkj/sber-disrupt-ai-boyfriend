@@ -16,19 +16,15 @@ from app.models.user_profile import UserProfile
 
 class OnboardingService:
     _steps = (
-        'companion_role',
         'companion_gender',
         'user_gender',
-        'user_pronouns',
         'preferred_address',
         'language',
         'timezone',
     )
     _questions = {
-        'companion_role': 'Кого ты хочешь видеть рядом: AI-boyfriend или AI-girlfriend?',
-        'companion_gender': 'Какой пол и образ компаньона тебе ближе: male, female, non_binary или unspecified?',
+        'companion_gender': 'Кого ты хочешь видеть рядом? Ответь female, если нужен AI-girlfriend, или male в остальных случаях.',
         'user_gender': 'Какой пол учитывать в обращении к тебе? Можно ответить unspecified.',
-        'user_pronouns': 'Какие местоимения использовать для тебя? Напиши их или ответь «пропустить».',
         'preferred_address': 'Как к тебе обращаться? Напиши имя или обращение, либо «пропустить».',
         'language': 'На каком языке общаться? Ответь ru или en.',
         'timezone': 'В каком часовом поясе ты находишься? Например, Europe/Moscow.',
@@ -39,6 +35,8 @@ class OnboardingService:
     async def start(cls: type['OnboardingService'], db: AsyncSession, user_id: UUID) -> OnboardingResponse:
         profile = await UserProfileDao.ensure(db, user_id)
         state = await OnboardingDao.ensure(db, user_id)
+        if state.step == 'companion_role':
+            state.step = 'companion_gender'
         await db.commit()
         logger.info('onboarding_started user_id=%s step=%s', user_id, state.step)
         return cls._response(profile, state)
@@ -47,6 +45,8 @@ class OnboardingService:
     async def answer(cls: type['OnboardingService'], db: AsyncSession, user_id: UUID, answer: str) -> OnboardingResponse:
         profile = await UserProfileDao.ensure(db, user_id)
         state = await OnboardingDao.ensure(db, user_id)
+        if state.step == 'companion_role':
+            state.step = 'companion_gender'
         if state.status == 'completed':
             return cls._response(profile, state)
         value = cls._normalize(state.step, answer)
@@ -117,17 +117,17 @@ class OnboardingService:
         if not value:
             raise ValueError('Ответ не может быть пустым')
         if step == 'companion_role':
-            if lowered in {'boyfriend', 'парень', 'мужчина', 'м'}:
-                return 'boyfriend'
-            if lowered in {'girlfriend', 'девушка', 'женщина', 'ж'}:
-                return 'girlfriend'
-            raise ValueError('Ответь boyfriend или girlfriend')
-        if step in {'companion_gender', 'user_gender'}:
+            return 'male'
+        if step == 'companion_gender':
+            if lowered in {'female', 'girlfriend', 'девушка', 'женщина', 'ж'}:
+                return 'female'
+            return 'male'
+        if step == 'user_gender':
             normalized = lowered.replace('-', '_').replace(' ', '_')
             if normalized not in cls._genders:
                 raise ValueError('Используй male, female, non_binary или unspecified')
             return normalized
-        if step in {'user_pronouns', 'preferred_address'} and lowered in {'пропустить', 'skip', '-', 'нет'}:
+        if step == 'preferred_address' and lowered in {'пропустить', 'skip', '-', 'нет'}:
             return ''
         if step == 'language':
             if lowered not in {'ru', 'en'}:
@@ -152,7 +152,11 @@ class OnboardingService:
             'language': None,
             'timezone': None,
         }
-        fields[step] = value
+        if step == 'companion_gender':
+            fields['companion_role'] = 'girlfriend' if value == 'female' else 'boyfriend'
+            fields['companion_gender'] = 'female' if value == 'female' else 'male'
+        else:
+            fields[step] = value
         return (
             fields['companion_role'],
             fields['companion_gender'],

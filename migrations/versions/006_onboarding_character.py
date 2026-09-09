@@ -58,7 +58,7 @@ def upgrade() -> None:
         'onboarding_states',
         sa.Column('user_id', sa.UUID(), nullable=False),
         sa.Column('status', sa.String(length=30), nullable=False, server_default='in_progress'),
-        sa.Column('step', sa.String(length=50), nullable=False, server_default='companion_role'),
+        sa.Column('step', sa.String(length=50), nullable=False, server_default='companion_gender'),
         sa.Column('answers', sa.JSON(), nullable=False, server_default='{}'),
         sa.Column('completed_at', sa.DateTime(), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=False),

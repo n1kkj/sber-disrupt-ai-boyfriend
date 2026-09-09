@@ -14,7 +14,7 @@ class OnboardingState(Base):
 
     user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
     status: Mapped[str] = mapped_column(sa.String(30), default='in_progress')
-    step: Mapped[str] = mapped_column(sa.String(50), default='companion_role')
+    step: Mapped[str] = mapped_column(sa.String(50), default='companion_gender')
     answers: Mapped[Dict[str, Any]] = mapped_column(sa.JSON, default=dict)
     completed_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow)
