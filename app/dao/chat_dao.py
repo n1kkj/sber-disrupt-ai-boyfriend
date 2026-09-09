@@ -92,3 +92,9 @@ class ChatDao:
     async def touch(cls: type['ChatDao'], db: AsyncSession, chat_id: UUID) -> None:
         await db.execute(sa.update(Chat).where(Chat.id == chat_id).values(updated_at=Base.utcnow()))
         await db.flush()
+
+    @classmethod
+    async def set_boyfriend(cls: type['ChatDao'], db: AsyncSession, chat: Chat, boyfriend_id: UUID) -> Chat:
+        chat.boyfriend_id = boyfriend_id
+        await db.flush()
+        return chat

@@ -61,3 +61,16 @@ class UserProfileDao:
             profile.timezone = timezone
         await db.flush()
         return profile
+
+    @classmethod
+    async def sync_companion_from_onboarding(
+        cls: type['UserProfileDao'],
+        db: AsyncSession,
+        profile: UserProfile,
+        companion_gender: str,
+    ) -> UserProfile:
+        normalized_gender = 'female' if companion_gender == 'female' else 'male'
+        profile.companion_gender = normalized_gender
+        profile.companion_role = 'girlfriend' if normalized_gender == 'female' else 'boyfriend'
+        await db.flush()
+        return profile

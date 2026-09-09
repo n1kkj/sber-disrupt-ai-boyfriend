@@ -21,9 +21,19 @@ class GenderAndAddressingService:
         user_gender = profile.user_gender or 'unspecified'
         address = profile.preferred_address or 'нейтрально, без придуманного имени'
         pronouns = profile.user_pronouns or 'не указаны'
-        character_pronouns = character.pronouns or 'не указаны'
+        character_pronouns = cls._companion_pronouns(companion_gender, character.pronouns)
+        if companion_gender == 'female':
+            gender_instruction = (
+                'Ты говоришь от лица женщины и AI-girlfriend. Используй женский род: '
+                '«я рада», «я готова», «я была». Не называй себя бойфрендом и не используй мужской род.'
+            )
+        else:
+            gender_instruction = (
+                'Ты говоришь от лица мужчины и AI-boyfriend. Используй мужской род и не называй себя girlfriend.'
+            )
         return (
-            '\n\nНастройки роли и обращения:\n'
+            '\n\nКРИТИЧЕСКИЕ НАСТРОЙКИ ПЕРСОНАЖА. Они имеют приоритет над базовым prompt персонажа:\n'
+            f'- {gender_instruction}\n'
             f'- Роль компаньона: {companion_role}.\n'
             f'- Пол компаньона: {cls._gender_names.get(companion_gender, companion_gender)}.\n'
             f'- Местоимения компаньона: {character_pronouns}.\n'
@@ -34,3 +44,15 @@ class GenderAndAddressingService:
             'личности или предпочтениях пользователя сверх явно указанных данных. '
             'Всегда уважай границы и не создавай эмоциональную зависимость.'
         )
+
+    @classmethod
+    def _companion_pronouns(
+        cls: type['GenderAndAddressingService'],
+        gender: str,
+        fallback: str | None,
+    ) -> str:
+        if gender == 'female':
+            return 'она/ее'
+        if gender == 'male':
+            return 'он/его'
+        return fallback or 'нейтральные'

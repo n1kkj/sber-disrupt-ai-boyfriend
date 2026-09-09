@@ -7,7 +7,6 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.dao.boyfriend_dao import BoyfriendDao
-from app.dao.character_version_dao import CharacterVersionDao
 from app.database import async_engine, async_session
 from app.logging import logger
 from app.middleware import RequestLoggingMiddleware
@@ -32,10 +31,7 @@ class ApplicationLifecycle:
             logger.info('database_schema_ready')
             main_app.state.db = self.session_factory
             async with self.session_factory() as session:
-                await BoyfriendDao.ensure_default(session)
-                boyfriend = await BoyfriendDao.get_first_active(session)
-                if boyfriend is not None:
-                    await CharacterVersionDao.ensure_default(session, boyfriend.id, boyfriend.name, boyfriend.system_prompt)
+                await BoyfriendDao.ensure_default_pair(session)
             logger.info('default_companion_ready')
             if config.telegram.mode.lower() == 'polling':
                 if not config.telegram.bot_token:

@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dao.boyfriend_dao import BoyfriendDao
+from app.dao.chat_dao import ChatDao
 from app.dao.onboarding_dao import OnboardingDao
 from app.dao.user_profile_dao import UserProfileDao
 from app.dto.onboarding import OnboardingResponse
@@ -62,6 +64,7 @@ class OnboardingService:
             fields[5],
             fields[6],
         )
+        await cls._switch_companion(db, user_id, fields[1])
         answers = dict(state.answers)
         answers[state.step] = value
         current_index = cls._steps.index(state.step)
@@ -105,10 +108,48 @@ class OnboardingService:
             language,
             timezone,
         )
+        selected_gender = companion_gender
+        if selected_gender is None and companion_role is not None:
+            selected_gender = 'female' if companion_role == 'girlfriend' else 'male'
+        if selected_gender is not None:
+            await cls._switch_companion(db, user_id, selected_gender)
         await db.commit()
         await db.refresh(profile)
         logger.info('user_profile_updated user_id=%s', user_id)
         return UserProfileResponse.model_validate(profile)
+
+    @classmethod
+    async def sync_companion(
+        cls: type['OnboardingService'],
+        db: AsyncSession,
+        user_id: UUID,
+        companion_gender: str,
+    ) -> None:
+        await cls._switch_companion(db, user_id, companion_gender)
+
+    @classmethod
+    async def _switch_companion(
+        cls: type['OnboardingService'],
+        db: AsyncSession,
+        user_id: UUID,
+        companion_gender: Optional[str],
+    ) -> None:
+        if companion_gender is None:
+            return
+        boyfriend = await BoyfriendDao.get_for_gender(db, companion_gender)
+        if boyfriend is None:
+            logger.warning('companion_switch_skipped user_id=%s gender=%s reason=not_configured', user_id, companion_gender)
+            return
+        chats = await ChatDao.list_for_user(db, user_id)
+        for chat in chats:
+            await ChatDao.set_boyfriend(db, chat, boyfriend.id)
+        logger.info(
+            'companion_switched user_id=%s gender=%s boyfriend_id=%s chats=%s',
+            user_id,
+            companion_gender,
+            boyfriend.id,
+            len(chats),
+        )
 
     @classmethod
     def _normalize(cls: type['OnboardingService'], step: str, answer: str) -> str:

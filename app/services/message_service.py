@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dao.chat_dao import ChatDao
 from app.dao.character_version_dao import CharacterVersionDao
 from app.dao.message_dao import MessageDao
+from app.dao.onboarding_dao import OnboardingDao
 from app.dao.user_profile_dao import UserProfileDao
 from app.dao.user_dao import UserDao
 from app.logging import logger
@@ -15,6 +16,7 @@ from app.models.message import Message
 from app.services.gemini_service import GeminiAIService
 from app.services.gender_addressing_service import GenderAndAddressingService
 from app.services.memory_service import MemoryService
+from app.services.onboarding_service import OnboardingService
 from app.services.redis_task_service import RedisTaskService
 
 
@@ -125,6 +127,23 @@ class MessageService:
         message, chat, boyfriend = message_data
         user = await UserDao.get_by_id(db, chat.user_id)
         profile = await UserProfileDao.ensure(db, chat.user_id)
+        onboarding = await OnboardingDao.get(db, chat.user_id)
+        if onboarding is not None:
+            onboarding_gender = onboarding.answers.get('companion_gender')
+            if isinstance(onboarding_gender, str):
+                if onboarding_gender != profile.companion_gender:
+                    await UserProfileDao.sync_companion_from_onboarding(db, profile, onboarding_gender)
+                await OnboardingService.sync_companion(db, chat.user_id, onboarding_gender)
+                await db.commit()
+                await db.refresh(profile)
+                refreshed_message_data = await MessageDao.get_with_chat_boyfriend(db, message_id)
+                if refreshed_message_data is not None:
+                    message, chat, boyfriend = refreshed_message_data
+                logger.info(
+                    'message_profile_synced_from_onboarding user_id=%s companion_gender=%s',
+                    chat.user_id,
+                    profile.companion_gender,
+                )
         character = await CharacterVersionDao.get_active(db, boyfriend.id)
         if character is None:
             character = await CharacterVersionDao.ensure_default(db, boyfriend.id, boyfriend.name, boyfriend.system_prompt)
@@ -153,7 +172,12 @@ class MessageService:
                 for item in context
                 if item.role in {'user', 'assistant'}
             ]
-            system_prompt = character.system_prompt + GenderAndAddressingService.build_context(profile, character)
+            system_prompt = (
+                'Сначала определи стиль и пол компаньона по критическим настройкам ниже. '
+                'Если базовый prompt противоречит им, всегда соблюдай критические настройки.\n\n'
+                + character.system_prompt
+                + GenderAndAddressingService.build_context(profile, character)
+            )
             reply_text = await GeminiAIService.generate_reply(system_prompt, prompt_messages)
         except Exception as error:
             logger.exception('message_ai_processing_failed message_id=%s', message_id)

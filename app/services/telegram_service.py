@@ -43,7 +43,9 @@ class TelegramService:
         chat = await ChatDao.get_for_platform(db, user.id, 'telegram')
         if chat is not None:
             return chat
-        boyfriend = await BoyfriendDao.get_first_active(db)
+        boyfriend = await BoyfriendDao.get_for_gender(db, 'male')
+        if boyfriend is None:
+            boyfriend = await BoyfriendDao.get_first_active(db)
         if boyfriend is None:
             raise RuntimeError('No active boyfriend configured')
         chat = await ChatDao.create(db, user.id, boyfriend.id, 'Telegram chat', 'telegram')
