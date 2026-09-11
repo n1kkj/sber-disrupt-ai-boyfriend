@@ -1,7 +1,8 @@
-from typing import List, Optional
+from typing import List, NoReturn, Optional
 
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError
 
 from app.logging import logger
 from settings import config
@@ -15,6 +16,16 @@ class GeminiMultimodalService:
         return genai.Client(api_key=config.gemini.api_key)
 
     @classmethod
+    def _raise_provider_error(cls: type['GeminiMultimodalService'], error: ClientError) -> NoReturn:
+        status_code = getattr(error, 'status_code', None)
+        if status_code in {400, 401, 403}:
+            raise ValueError(
+                'Gemini отклонил API-ключ для media-запроса. Проверьте GEMINI_API_KEY '
+                'в окружении Celery worker и перезапустите worker.'
+            ) from error
+        raise error
+
+    @classmethod
     async def transcribe_audio(
         cls: type['GeminiMultimodalService'],
         data: bytes,
@@ -22,13 +33,16 @@ class GeminiMultimodalService:
     ) -> str:
         logger.info('gemini_audio_transcription_started bytes=%s mime=%s', len(data), mime_type)
         client = cls._client()
-        response = await client.aio.models.generate_content(
-            model=config.gemini.model,
-            contents=[
-                'Точно транскрибируй аудио на языке оригинала. Верни только текст без комментариев и оформления.',
-                types.Part.from_bytes(data=data, mime_type=mime_type),
-            ],
-        )
+        try:
+            response = await client.aio.models.generate_content(
+                model=config.gemini.model,
+                contents=[
+                    'Точно транскрибируй аудио на языке оригинала. Верни только текст без комментариев и оформления.',
+                    types.Part.from_bytes(data=data, mime_type=mime_type),
+                ],
+            )
+        except ClientError as error:
+            cls._raise_provider_error(error)
         text = (response.text or '').strip()
         if not text:
             raise ValueError('Gemini не вернул транскрипт аудио')
@@ -43,13 +57,16 @@ class GeminiMultimodalService:
     ) -> str:
         logger.info('gemini_image_description_started bytes=%s mime=%s', len(data), mime_type)
         client = cls._client()
-        response = await client.aio.models.generate_content(
-            model=config.gemini.model,
-            contents=[
-                'Кратко опиши изображение для контекста личного диалога. Не придумывай факты, 2-4 предложения.',
-                types.Part.from_bytes(data=data, mime_type=mime_type),
-            ],
-        )
+        try:
+            response = await client.aio.models.generate_content(
+                model=config.gemini.model,
+                contents=[
+                    'Кратко опиши изображение для контекста личного диалога. Не придумывай факты, 2-4 предложения.',
+                    types.Part.from_bytes(data=data, mime_type=mime_type),
+                ],
+            )
+        except ClientError as error:
+            cls._raise_provider_error(error)
         text = (response.text or '').strip()
         if not text:
             raise ValueError('Gemini не вернул описание изображения')
@@ -73,7 +90,10 @@ class GeminiMultimodalService:
         contents: List[object] = [prompt]
         contents.extend(types.Part.from_bytes(data=frame, mime_type='image/jpeg') for frame in frames)
         client = cls._client()
-        response = await client.aio.models.generate_content(model=config.gemini.model, contents=contents)
+        try:
+            response = await client.aio.models.generate_content(model=config.gemini.model, contents=contents)
+        except ClientError as error:
+            cls._raise_provider_error(error)
         text = (response.text or '').strip()
         if not text:
             raise ValueError('Gemini не вернул описание видео')
