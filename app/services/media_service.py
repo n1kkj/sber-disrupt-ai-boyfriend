@@ -93,8 +93,8 @@ class MediaService:
             duration = await MediaProbeService.duration_seconds(path)
             if duration > config.media.max_audio_duration_seconds:
                 raise ValueError('Аудио превышает допустимую длительность')
-            data = await LocalStorageService.read_bytes(asset.storage_key or '')
-            transcript = await GeminiMultimodalService.transcribe_audio(data, asset.mime_type or 'audio/ogg')
+            data, transcription_mime = await cls._prepare_audio(path, asset.mime_type or 'audio/ogg')
+            transcript = await GeminiMultimodalService.transcribe_audio(data, transcription_mime)
             asset.duration_seconds = duration
             await MediaAssetDao.mark_completed(db, asset, transcript, None)
             message.content = transcript
@@ -190,6 +190,26 @@ class MediaService:
     @classmethod
     async def _extract_video_media(cls: type['MediaService'], path: Path) -> Tuple[List[bytes], Optional[bytes]]:
         return await asyncio.to_thread(cls._extract_video_media_sync, path)
+
+    @classmethod
+    async def _prepare_audio(
+        cls: type['MediaService'],
+        path: Path,
+        mime_type: str,
+    ) -> Tuple[bytes, str]:
+        if mime_type not in {'audio/ogg', 'audio/webm'}:
+            return await asyncio.to_thread(path.read_bytes), mime_type
+        return await asyncio.to_thread(cls._convert_audio_to_wav, path)
+
+    @classmethod
+    def _convert_audio_to_wav(cls: type['MediaService'], path: Path) -> Tuple[bytes, str]:
+        with tempfile.TemporaryDirectory(prefix='ai-companion-audio-') as directory:
+            output_path = Path(directory) / 'audio.wav'
+            command = [
+                'ffmpeg', '-y', '-v', 'error', '-i', str(path), '-ac', '1', '-ar', '16000', str(output_path),
+            ]
+            subprocess.run(command, check=True, capture_output=True)
+            return output_path.read_bytes(), 'audio/wav'
 
     @classmethod
     def _extract_video_media_sync(cls: type['MediaService'], path: Path) -> Tuple[List[bytes], Optional[bytes]]:

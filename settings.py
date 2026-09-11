@@ -24,7 +24,7 @@ class GeminiConfig(BaseSettings):
     api_key: str = ''
     model: str = 'gemini-2.5-flash'
     embedding_model: str = 'gemini-embedding-001'
-    base_url: str = 'https://generativelanguage.googleapis.com/v1beta/openai/'
+    base_url: str = 'https://api.artemox.com/v1'
     proxy_url: Optional[str] = None
     model_config = SettingsConfigDict(env_prefix='GEMINI_', env_file='.env', extra='ignore')
 

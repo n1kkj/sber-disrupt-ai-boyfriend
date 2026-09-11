@@ -14,7 +14,7 @@ JWT_SECRET=replace-with-a-long-random-string
 GEMINI_API_KEY=your-key
 GEMINI_MODEL=gemini-2.5-flash
 GEMINI_EMBEDDING_MODEL=gemini-embedding-001
-GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+GEMINI_BASE_URL=https://api.artemox.com/v1
 GEMINI_PROXY_URL=http://user:password@proxy-host:port
 TELEGRAM_BOT_TOKEN=your-token
 TELEGRAM_BOT_USERNAME=your_bot_username
@@ -68,7 +68,9 @@ worker сохраняет в общую историю. Для повторяе�
 `beat` зарезервирован для будущих регулярных задач, Redis хранит broker,
 result backend и состояние отменяемых message tasks.
 
-Медиафайлы пока сохраняются локально в `MEDIA_STORAGE_PATH`. Ограничения
+Для текста и media используется OpenAI-compatible LiteLLM gateway через
+`GEMINI_BASE_URL`; ключ передаётся только backend worker-ам. Медиафайлы пока
+сохраняются локально в `MEDIA_STORAGE_PATH`. Ограничения
 размера и длительности задаются через `MEDIA_*`. Видео обрабатывается кадрами
 с интервалом `MEDIA_VIDEO_FRAME_INTERVAL_SECONDS` и ограничением
 `MEDIA_VIDEO_MAX_FRAMES`; для аудио и видео используется `ffprobe`/`ffmpeg`.
