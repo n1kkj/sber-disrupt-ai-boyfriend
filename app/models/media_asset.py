@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
@@ -21,4 +21,8 @@ class MediaAsset(Base):
     size_bytes: Mapped[Optional[int]] = mapped_column(sa.BigInteger, nullable=True)
     duration_seconds: Mapped[Optional[int]] = mapped_column(sa.Integer, nullable=True)
     processing_status: Mapped[str] = mapped_column(sa.String(20), default='pending', index=True)
+    transcript: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
+    metadata_json: Mapped[Dict[str, Any]] = mapped_column(sa.JSON, default=dict)
+    error_message: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow, index=True)

@@ -7,7 +7,7 @@ celery_app = Celery(
     'ai_companion',
     broker=config.redis.url,
     backend=config.redis.url,
-    include=['app.tasks.message_task'],
+    include=['app.tasks.message_task', 'app.tasks.media_task'],
 )
 celery_app.conf.update(
     task_default_queue=config.celery.default_queue,

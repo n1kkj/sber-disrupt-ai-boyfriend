@@ -69,6 +69,18 @@ class RateLimitConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='RATE_LIMIT_', env_file='.env', extra='ignore')
 
 
+class MediaConfig(BaseSettings):
+    storage_path: str = 'storage/media'
+    max_audio_bytes: int = Field(default=20 * 1024 * 1024, ge=1)
+    max_image_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    max_video_bytes: int = Field(default=50 * 1024 * 1024, ge=1)
+    max_audio_duration_seconds: int = Field(default=180, ge=1)
+    max_video_duration_seconds: int = Field(default=120, ge=1)
+    video_frame_interval_seconds: int = Field(default=2, ge=1)
+    video_max_frames: int = Field(default=60, ge=1)
+    model_config = SettingsConfigDict(env_prefix='MEDIA_', env_file='.env', extra='ignore')
+
+
 class Settings(BaseSettings):
     db: DatabaseConfig = Field(default_factory=DatabaseConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
@@ -78,6 +90,7 @@ class Settings(BaseSettings):
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
+    media: MediaConfig = Field(default_factory=MediaConfig)
     debug: bool = True
     app_title: str = 'AI boyfriend MVP'
     platform_url: str = 'http://localhost:3000'

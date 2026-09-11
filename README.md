@@ -60,11 +60,20 @@ worker сохраняет в общую историю. Для повторяе�
 `GET /api/v1/auth/me`, `GET /api/v1/boyfriends`, `POST /api/v1/chats`,
 `POST /api/v1/chats/{chat_id}/messages`,
 `POST /api/v1/chats/{chat_id}/messages/{message_id}/cancel`,
+`POST /api/v1/chats/{chat_id}/media`,
 `POST /api/v1/telegram/webhook`.
 
-Фоновые процессы: `app` обслуживает API, `worker` обрабатывает сообщения,
+Фоновые процессы: `app` обслуживает API, `worker` обрабатывает сообщения и
+медиа в очередях `messages`, `audio`, `image`, `video`,
 `beat` зарезервирован для будущих регулярных задач, Redis хранит broker,
 result backend и состояние отменяемых message tasks.
+
+Медиафайлы пока сохраняются локально в `MEDIA_STORAGE_PATH`. Ограничения
+размера и длительности задаются через `MEDIA_*`. Видео обрабатывается кадрами
+с интервалом `MEDIA_VIDEO_FRAME_INTERVAL_SECONDS` и ограничением
+`MEDIA_VIDEO_MAX_FRAMES`; для аудио и видео используется `ffprobe`/`ffmpeg`.
+При локальном запуске установите `ffmpeg` в систему; Dockerfile устанавливает
+его автоматически.
 
 Для каждого пользователя используются отдельные чаты `web` и `telegram`.
 При связывании аккаунтов оба чата создаются автоматически, а ответ Celery

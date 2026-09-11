@@ -18,6 +18,7 @@ from app.models.user import User
 from app.security import SecurityService
 from app.services.account_link_service import AccountLinkService
 from app.services.message_service import MessageService
+from app.services.media_service import MediaService
 from app.services.onboarding_service import OnboardingService
 from app.services.rate_limit_service import RateLimitService
 from settings import config
@@ -99,12 +100,16 @@ class TelegramService:
     async def process_update(cls: type['TelegramService'], db: AsyncSession, update: Dict[str, Any]) -> None:
         logger.info('telegram_update_received update_id=%s', update.get('update_id'))
         message = update.get('message') or update.get('edited_message')
-        if not message or not message.get('text') or not message.get('chat', {}).get('id'):
+        if not message or not message.get('chat', {}).get('id'):
             logger.debug('telegram_update_ignored reason=unsupported_payload')
             return
         telegram_chat_id = int(message['chat']['id'])
         telegram_user = message.get('from', {})
-        text = str(message['text'])
+        text = str(message.get('text') or '')
+        media_payload = cls._get_media_payload(message)
+        if not text and media_payload is None:
+            logger.debug('telegram_update_ignored reason=unsupported_payload')
+            return
         username = telegram_user.get('username') or telegram_user.get('first_name')
         current_user = await UserDao.get_by_telegram_id(db, telegram_chat_id)
         is_platform_connected = current_user is not None and not current_user.is_telegram_only
@@ -156,6 +161,13 @@ class TelegramService:
             chat = await cls.get_or_create_chat(db, telegram_chat_id, username)
             onboarding = await OnboardingService.start(db, chat.user_id)
             if onboarding.status != 'completed':
+                if not text:
+                    await cls.send_message(
+                        telegram_chat_id,
+                        f'Сначала ответь текстом на вопрос onboarding:\n\n{onboarding.question}',
+                        cls._connect_keyboard(is_platform_connected),
+                    )
+                    return
                 try:
                     onboarding = await OnboardingService.answer(db, chat.user_id, text)
                 except ValueError as error:
@@ -175,6 +187,32 @@ class TelegramService:
                     telegram_chat_id,
                     onboarding.question or 'Онбординг завершен. Теперь можно общаться.',
                     cls._connect_keyboard(is_platform_connected),
+                )
+                return
+            if media_payload is not None:
+                file_id, mime_type, filename, message_type = media_payload
+                media_limits = {
+                    'audio': config.media.max_audio_bytes,
+                    'image': config.media.max_image_bytes,
+                    'video': config.media.max_video_bytes,
+                }
+                media_data = await asyncio.to_thread(cls._download_file, file_id, media_limits[message_type])
+                _, _, task_id = await MediaService.create_asset_message(
+                    db,
+                    chat.user_id,
+                    chat.id,
+                    media_data,
+                    filename,
+                    mime_type,
+                    'telegram',
+                    f'{telegram_chat_id}:{message["message_id"]}' if message.get('message_id') is not None else None,
+                    message_type,
+                )
+                logger.info(
+                    'telegram_media_enqueued chat_suffix=%s type=%s task_id=%s',
+                    str(telegram_chat_id)[-4:],
+                    message_type,
+                    task_id,
                 )
                 return
             update_id = str(update.get('update_id')) if update.get('update_id') is not None else None
@@ -204,6 +242,61 @@ class TelegramService:
         if connected:
             return {'remove_keyboard': True}
         return {'keyboard': [[{'text': 'Подключиться к платформе'}]], 'resize_keyboard': True, 'is_persistent': True}
+
+    @classmethod
+    def _get_media_payload(
+        cls: type['TelegramService'],
+        message: Dict[str, Any],
+    ) -> Optional[tuple[str, str, str, str]]:
+        voice = message.get('voice')
+        if voice is not None:
+            return str(voice['file_id']), str(voice.get('mime_type') or 'audio/ogg'), 'voice.ogg', 'audio'
+        audio = message.get('audio')
+        if audio is not None:
+            return str(audio['file_id']), str(audio.get('mime_type') or 'audio/mpeg'), str(audio.get('file_name') or 'audio'), 'audio'
+        video = message.get('video')
+        if video is not None:
+            return str(video['file_id']), str(video.get('mime_type') or 'video/mp4'), str(video.get('file_name') or 'video.mp4'), 'video'
+        photo = message.get('photo')
+        if photo:
+            image = photo[-1]
+            return str(image['file_id']), 'image/jpeg', 'photo.jpg', 'image'
+        document = message.get('document')
+        if document is not None:
+            mime_type = str(document.get('mime_type') or '')
+            if mime_type.startswith('audio/'):
+                message_type = 'audio'
+            elif mime_type.startswith('image/'):
+                message_type = 'image'
+            elif mime_type.startswith('video/'):
+                message_type = 'video'
+            else:
+                return None
+            return str(document['file_id']), mime_type, str(document.get('file_name') or 'document'), message_type
+        return None
+
+    @classmethod
+    def _download_file(cls: type['TelegramService'], file_id: str, max_size_bytes: int) -> bytes:
+        file_response = requests.get(
+            f'https://api.telegram.org/bot{config.telegram.bot_token}/getFile',
+            params={'file_id': file_id},
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
+            timeout=20,
+        )
+        file_response.raise_for_status()
+        file_path = file_response.json().get('result', {}).get('file_path')
+        if not file_path:
+            raise RuntimeError('Telegram file path is missing')
+        file_size = file_response.json().get('result', {}).get('file_size')
+        if file_size is not None and int(file_size) > max_size_bytes:
+            raise ValueError('Файл превышает допустимый размер')
+        content_response = requests.get(
+            f'https://api.telegram.org/file/bot{config.telegram.bot_token}/{file_path}',
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
+            timeout=60,
+        )
+        content_response.raise_for_status()
+        return content_response.content
 
     @classmethod
     async def polling_loop(cls: type['TelegramService'], session_factory: async_sessionmaker, stop_event: asyncio.Event) -> None:

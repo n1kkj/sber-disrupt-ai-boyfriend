@@ -37,3 +37,39 @@ class MediaAssetDao:
     async def list_for_message(cls: type['MediaAssetDao'], db: AsyncSession, message_id: UUID) -> List[MediaAsset]:
         result = await db.scalars(sa.select(MediaAsset).where(MediaAsset.message_id == message_id).order_by(MediaAsset.created_at))
         return list(result)
+
+    @classmethod
+    async def get_by_id(cls: type['MediaAssetDao'], db: AsyncSession, asset_id: UUID) -> Optional[MediaAsset]:
+        return await db.scalar(sa.select(MediaAsset).where(MediaAsset.id == asset_id))
+
+    @classmethod
+    async def mark_processing(cls: type['MediaAssetDao'], db: AsyncSession, asset: MediaAsset) -> MediaAsset:
+        asset.processing_status = 'processing'
+        asset.error_message = None
+        await db.commit()
+        await db.refresh(asset)
+        return asset
+
+    @classmethod
+    async def mark_completed(
+        cls: type['MediaAssetDao'],
+        db: AsyncSession,
+        asset: MediaAsset,
+        transcript: Optional[str],
+        description: Optional[str],
+    ) -> MediaAsset:
+        asset.processing_status = 'completed'
+        asset.transcript = transcript
+        asset.description = description
+        asset.error_message = None
+        await db.commit()
+        await db.refresh(asset)
+        return asset
+
+    @classmethod
+    async def mark_failed(cls: type['MediaAssetDao'], db: AsyncSession, asset: MediaAsset, error_message: str) -> MediaAsset:
+        asset.processing_status = 'failed'
+        asset.error_message = error_message[:2000]
+        await db.commit()
+        await db.refresh(asset)
+        return asset
