@@ -36,7 +36,9 @@ class GeminiSpeechService:
         )
         try:
             pcm_audio = await asyncio.to_thread(cls._generate_pcm, clean_text)
+            logger.info('gemini_speech_pcm_received bytes=%s', len(pcm_audio))
             audio = await asyncio.to_thread(cls._convert_to_telegram_ogg, pcm_audio)
+            logger.info('gemini_speech_ogg_converted bytes=%s', len(audio))
         except Exception as error:
             cls._raise_provider_error(error)
         if not audio:

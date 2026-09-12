@@ -32,6 +32,11 @@ class ProcessSpeechTask(Task):
         RedisTaskService.save_state(assistant_message_id, task_id, 'running')
         try:
             audio = asyncio.run(self._synthesize(assistant_message_id))
+            logger.info(
+                'celery_speech_audio_ready assistant_message_id=%s bytes=%s',
+                assistant_message_id,
+                len(audio),
+            )
             from app.services.telegram_service import TelegramService
 
             asyncio.run(TelegramService.send_voice(telegram_id, audio, telegram_connected))

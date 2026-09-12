@@ -133,6 +133,9 @@ class TelegramService:
             timeout=60,
         )
         response.raise_for_status()
+        response_data = response.json()
+        if not response_data.get('ok'):
+            raise RuntimeError(f'Telegram sendVoice failed: {response_data}')
 
     @classmethod
     async def set_webhook(cls: type['TelegramService'], webhook_url: str) -> None:
