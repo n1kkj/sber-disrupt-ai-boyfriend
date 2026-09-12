@@ -25,8 +25,8 @@ class GeminiConfig(BaseSettings):
     model: str = 'gemini-2.5-flash'
     transcription_model: Optional[str] = None
     tts_model: str = 'gemini-2.5-flash-preview-tts'
-    tts_voice: str = 'alloy'
-    tts_response_format: str = 'opus'
+    tts_voice: str = 'Kore'
+    tts_response_format: Optional[str] = None
     embedding_model: str = 'gemini-embedding-001'
     base_url: str = 'https://api.artemox.com/v1'
     proxy_url: Optional[str] = None
