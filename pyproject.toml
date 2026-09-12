@@ -10,7 +10,6 @@ dependencies = [
     "celery[redis]>=5.5.3",
     "email-validator>=2.3.0",
     "fastapi~=0.115.4",
-    "google-genai>=1.0.0",
     "httpx>=0.28.1",
     "langchain-openai>=0.3.35",
     "pyjwt>=2.10.1",

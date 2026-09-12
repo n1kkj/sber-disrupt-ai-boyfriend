@@ -8,20 +8,28 @@ from app.logging import logger
 
 class HttpClientFactory:
     @classmethod
-    def get_httpx_proxy_client(cls: type['HttpClientFactory'], provider: str) -> httpx.Client:
+    def get_httpx_proxy_client(
+        cls: type['HttpClientFactory'],
+        provider: str,
+        timeout: float = 45.0,
+    ) -> httpx.Client:
         proxy_url = cls._get_proxy_url(provider)
         logger.debug('http_client_created provider=%s proxy=%s', provider, bool(proxy_url))
         if proxy_url:
-            return httpx.Client(timeout=45.0, proxy=proxy_url)
-        return httpx.Client(timeout=45.0)
+            return httpx.Client(timeout=timeout, proxy=proxy_url)
+        return httpx.Client(timeout=timeout)
 
     @classmethod
-    def get_httpx_async_proxy_client(cls: type['HttpClientFactory'], provider: str) -> httpx.AsyncClient:
+    def get_httpx_async_proxy_client(
+        cls: type['HttpClientFactory'],
+        provider: str,
+        timeout: float = 45.0,
+    ) -> httpx.AsyncClient:
         proxy_url = cls._get_proxy_url(provider)
         logger.debug('async_http_client_created provider=%s proxy=%s', provider, bool(proxy_url))
         if proxy_url:
-            return httpx.AsyncClient(timeout=45.0, proxy=proxy_url)
-        return httpx.AsyncClient(timeout=45.0)
+            return httpx.AsyncClient(timeout=timeout, proxy=proxy_url)
+        return httpx.AsyncClient(timeout=timeout)
 
     @classmethod
     def get_requests_proxies(cls: type['HttpClientFactory'], provider: str) -> Dict[str, str]:

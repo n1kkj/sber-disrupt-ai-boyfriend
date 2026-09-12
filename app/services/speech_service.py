@@ -1,11 +1,9 @@
 import asyncio
 import base64
 import subprocess
-from typing import NoReturn
+from typing import Any, Dict, NoReturn
 
-from google import genai
-from google.genai import types
-
+from app.clients.http_client import HttpClientFactory
 from app.logging import logger
 from settings import config
 
@@ -35,7 +33,7 @@ class GeminiSpeechService:
             config.gemini.tts_voice,
         )
         try:
-            pcm_audio = await asyncio.to_thread(cls._generate_pcm, clean_text)
+            pcm_audio = await asyncio.to_thread(cls._request_pcm, clean_text)
             logger.info('gemini_speech_pcm_received bytes=%s', len(pcm_audio))
             audio = await asyncio.to_thread(cls._convert_to_telegram_ogg, pcm_audio)
             logger.info('gemini_speech_ogg_converted bytes=%s', len(audio))
@@ -47,43 +45,52 @@ class GeminiSpeechService:
         return audio
 
     @classmethod
-    def _generate_pcm(cls: type['GeminiSpeechService'], text: str) -> bytes:
+    def _request_pcm(cls: type['GeminiSpeechService'], text: str) -> bytes:
         if not config.gemini.api_key:
             raise ValueError('Не задан GEMINI_API_KEY для синтеза речи.')
-        client = genai.Client(
-            api_key=config.gemini.api_key,
-            http_options=types.HttpOptions(
-                base_url=cls._native_base_url(),
-                timeout=120_000,
-            ),
+        url = (
+            f'{cls._native_base_url()}/v1beta/models/'
+            f'{config.gemini.tts_model}:generateContent'
         )
-        response = client.models.generate_content(
-            model=config.gemini.tts_model,
-            contents=text,
-            config=types.GenerateContentConfig(
-                response_modalities=['AUDIO'],
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name=config.gemini.tts_voice,
-                        )
-                    )
-                ),
-            ),
+        payload: Dict[str, Any] = {
+            'contents': [{'parts': [{'text': text}]}],
+            'generationConfig': {
+                'responseModalities': ['AUDIO'],
+                'speechConfig': {
+                    'voiceConfig': {
+                        'prebuiltVoiceConfig': {
+                            'voiceName': config.gemini.tts_voice,
+                        }
+                    }
+                },
+            },
+        }
+        logger.info('gemini_speech_http_started url=%s', url)
+        with HttpClientFactory.get_httpx_proxy_client('gemini', timeout=120.0) as client:
+            response = client.post(
+                url,
+                headers={
+                    'x-goog-api-key': config.gemini.api_key,
+                    'Content-Type': 'application/json',
+                },
+                json=payload,
+            )
+        logger.info(
+            'gemini_speech_http_completed status=%s bytes=%s content_type=%s',
+            response.status_code,
+            len(response.content),
+            response.headers.get('content-type', ''),
         )
-        for candidate in response.candidates or []:
-            content = candidate.content
-            if content is None:
-                continue
-            for part in content.parts or []:
-                inline_data = part.inline_data
-                if inline_data is None or inline_data.data is None:
-                    continue
-                if isinstance(inline_data.data, bytes):
-                    return inline_data.data
-                return base64.b64decode(inline_data.data)
-        raise ValueError('Gemini не вернул inline audio data')
+        response.raise_for_status()
+        response_data: Dict[str, Any] = response.json()
+        for candidate in response_data.get('candidates', []):
+            content = candidate.get('content') or {}
+            for part in content.get('parts', []):
+                inline_data = part.get('inlineData') or part.get('inline_data') or {}
+                encoded_audio = inline_data.get('data')
+                if encoded_audio:
+                    return base64.b64decode(encoded_audio)
+        raise ValueError('Gemini не вернул candidates[].content.parts[].inlineData.data')
 
     @classmethod
     def _native_base_url(cls: type['GeminiSpeechService']) -> str:
