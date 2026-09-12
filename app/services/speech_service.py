@@ -1,38 +1,26 @@
 import asyncio
+import base64
 import subprocess
 from typing import NoReturn
 
-from openai import AsyncOpenAI
+from google import genai
+from google.genai import types
 
-from app.clients.http_client import HttpClientFactory
 from app.logging import logger
 from settings import config
 
 
 class GeminiSpeechService:
     @classmethod
-    def _client(cls: type['GeminiSpeechService']) -> AsyncOpenAI:
-        if not config.gemini.api_key:
-            raise ValueError('Не задан GEMINI_API_KEY для синтеза речи.')
-        return AsyncOpenAI(
-            api_key=config.gemini.api_key,
-            base_url=config.gemini.base_url,
-            http_client=HttpClientFactory.get_httpx_async_proxy_client('gemini'),
-            max_retries=0,
-        )
-
-    @classmethod
     def _raise_provider_error(cls: type['GeminiSpeechService'], error: Exception) -> NoReturn:
-        status_code = getattr(error, 'status_code', None)
-        response = getattr(error, 'response', None)
-        status_code = status_code or getattr(response, 'status_code', None)
+        status_code = getattr(error, 'status_code', None) or getattr(error, 'code', None)
         error_text = str(error).casefold()
+        logger.error('gemini_speech_provider_error status=%s error=%s', status_code, error)
         if status_code in {400, 401, 403} or 'api key' in error_text or 'unauthorized' in error_text:
             raise ValueError(
-                'Artemox отклонил TTS-запрос. Проверьте GEMINI_API_KEY, GEMINI_BASE_URL, '
-                'GEMINI_TTS_MODEL и GEMINI_TTS_VOICE.'
+                'Artemox отклонил Gemini TTS-запрос. Проверьте GEMINI_API_KEY, '
+                'GEMINI_NATIVE_BASE_URL, GEMINI_TTS_MODEL и GEMINI_TTS_VOICE.'
             ) from error
-        logger.error('gemini_speech_provider_error status=%s error=%s', status_code, error)
         raise error
 
     @classmethod
@@ -47,21 +35,8 @@ class GeminiSpeechService:
             config.gemini.tts_voice,
         )
         try:
-            if config.gemini.tts_model.casefold().startswith('gemini-'):
-                response = await cls._client().audio.speech.create(
-                    model=config.gemini.tts_model,
-                    voice=config.gemini.tts_voice,
-                    input=clean_text,
-                )
-            else:
-                response = await cls._client().audio.speech.create(
-                    model=config.gemini.tts_model,
-                    voice=config.gemini.tts_voice,
-                    input=clean_text,
-                    response_format=config.gemini.tts_response_format or 'mp3',
-                )
-            content_type = str(response.headers.get('content-type', ''))
-            audio = await asyncio.to_thread(cls._convert_to_telegram_ogg, response.content, content_type)
+            pcm_audio = await asyncio.to_thread(cls._generate_pcm, clean_text)
+            audio = await asyncio.to_thread(cls._convert_to_telegram_ogg, pcm_audio)
         except Exception as error:
             cls._raise_provider_error(error)
         if not audio:
@@ -70,34 +45,75 @@ class GeminiSpeechService:
         return audio
 
     @classmethod
+    def _generate_pcm(cls: type['GeminiSpeechService'], text: str) -> bytes:
+        if not config.gemini.api_key:
+            raise ValueError('Не задан GEMINI_API_KEY для синтеза речи.')
+        client = genai.Client(
+            api_key=config.gemini.api_key,
+            http_options=types.HttpOptions(base_url=cls._native_base_url()),
+        )
+        response = client.models.generate_content(
+            model=config.gemini.tts_model,
+            contents=text,
+            config=types.GenerateContentConfig(
+                response_modalities=['AUDIO'],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=config.gemini.tts_voice,
+                        )
+                    )
+                ),
+            ),
+        )
+        for candidate in response.candidates or []:
+            content = candidate.content
+            if content is None:
+                continue
+            for part in content.parts or []:
+                inline_data = part.inline_data
+                if inline_data is None or inline_data.data is None:
+                    continue
+                if isinstance(inline_data.data, bytes):
+                    return inline_data.data
+                return base64.b64decode(inline_data.data)
+        raise ValueError('Gemini не вернул inline audio data')
+
+    @classmethod
+    def _native_base_url(cls: type['GeminiSpeechService']) -> str:
+        native_base_url = config.gemini.native_base_url
+        if native_base_url:
+            return native_base_url.rstrip('/')
+        return config.gemini.base_url.removesuffix('/v1')
+
+    @classmethod
     def _convert_to_telegram_ogg(
         cls: type['GeminiSpeechService'],
-        audio: bytes,
-        content_type: str,
+        pcm_audio: bytes,
     ) -> bytes:
-        if not audio:
-            raise ValueError('Провайдер вернул пустое аудио')
-        input_args = []
-        normalized_content_type = content_type.casefold()
-        if 'pcm' in normalized_content_type or not normalized_content_type:
-            input_args = ['-f', 's16le', '-ar', '24000', '-ac', '1']
-        command = [
-            'ffmpeg',
-            '-hide_banner',
-            '-loglevel',
-            'error',
-        ] + input_args + [
-            '-i',
-            'pipe:0',
-            '-c:a',
-            'libopus',
-            '-f',
-            'ogg',
-            'pipe:1',
-        ]
+        if not pcm_audio:
+            raise ValueError('Gemini вернул пустое аудио')
         result = subprocess.run(
-            command,
-            input=audio,
+            [
+                'ffmpeg',
+                '-hide_banner',
+                '-loglevel',
+                'error',
+                '-f',
+                's16le',
+                '-ar',
+                '24000',
+                '-ac',
+                '1',
+                '-i',
+                'pipe:0',
+                '-c:a',
+                'libopus',
+                '-f',
+                'ogg',
+                'pipe:1',
+            ],
+            input=pcm_audio,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
