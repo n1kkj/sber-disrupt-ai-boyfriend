@@ -61,7 +61,7 @@ class GeminiSpeechService:
         )
         payload: Dict[str, Any] = {
             'model': config.gemini.tts_model,
-            'contents': [{'parts': [{'text': text}]}],
+            'contents': [{'role': 'user', 'parts': [{'text': text}]}],
             'generationConfig': {
                 'responseModalities': ['AUDIO'],
                 'speechConfig': {
