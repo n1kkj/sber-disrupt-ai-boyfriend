@@ -40,7 +40,7 @@ services:
   worker:
     build:
       dockerfile: Dockerfile
-    command: celery -A app.celery_app:celery_app worker --loglevel=INFO --pool=prefork -Q messages,audio,image,video
+    command: celery -A app.celery_app:celery_app worker --loglevel=INFO --pool=prefork -Q messages,audio,image,video,tts
     volumes:
       - .:/app
     env_file: .env

@@ -32,7 +32,14 @@ class ProcessMessageTask(Task):
             if message.platform == 'telegram' and assistant is not None and telegram_id is not None:
                 from app.services.telegram_service import TelegramService
 
-                asyncio.run(TelegramService.send_message(telegram_id, assistant.content, TelegramService._connect_keyboard(telegram_connected)))
+                asyncio.run(
+                    TelegramService.send_assistant_response(
+                        telegram_id,
+                        assistant.id,
+                        assistant.content,
+                        telegram_connected,
+                    )
+                )
             RedisTaskService.save_state(message_id, task_id, 'completed')
             logger.info('celery_message_task_completed message_id=%s task_id=%s', message_id, task_id)
             return {

@@ -2,6 +2,7 @@ import asyncio
 import json
 import secrets
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 import requests
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -71,6 +72,70 @@ class TelegramService:
         if reply_markup is not None:
             payload['reply_markup'] = reply_markup
         requests.post(f'https://api.telegram.org/bot{config.telegram.bot_token}/sendMessage', json=payload, proxies=HttpClientFactory.get_requests_proxies('telegram'), timeout=20).raise_for_status()
+
+    @classmethod
+    async def send_assistant_response(
+        cls: type['TelegramService'],
+        chat_id: int,
+        assistant_message_id: UUID,
+        text: str,
+        telegram_connected: bool,
+    ) -> None:
+        mode = config.telegram.response_mode.casefold()
+        if mode not in {'text', 'voice', 'both'}:
+            raise ValueError('TELEGRAM_RESPONSE_MODE должен быть text, voice или both')
+        if mode in {'text', 'both'}:
+            await cls.send_message(chat_id, text, cls._connect_keyboard(telegram_connected))
+        if mode in {'voice', 'both'}:
+            from app.tasks.speech_task import process_speech_task
+
+            process_speech_task.apply_async(
+                args=[str(assistant_message_id), chat_id, telegram_connected],
+                queue='tts',
+            )
+            logger.info(
+                'telegram_speech_enqueued chat_suffix=%s assistant_message_id=%s mode=%s',
+                str(chat_id)[-4:],
+                assistant_message_id,
+                mode,
+            )
+
+    @classmethod
+    async def send_voice(
+        cls: type['TelegramService'],
+        chat_id: int,
+        audio: bytes,
+        telegram_connected: bool,
+    ) -> None:
+        if not config.telegram.bot_token:
+            logger.warning('telegram_voice_send_skipped reason=bot_token_missing')
+            return
+        logger.info('telegram_voice_send_started chat_suffix=%s bytes=%s', str(chat_id)[-4:], len(audio))
+        try:
+            await asyncio.to_thread(cls._send_voice, chat_id, audio, telegram_connected)
+        except Exception:
+            logger.exception('telegram_voice_send_failed chat_suffix=%s', str(chat_id)[-4:])
+            raise
+        logger.info('telegram_voice_send_completed chat_suffix=%s', str(chat_id)[-4:])
+
+    @classmethod
+    def _send_voice(
+        cls: type['TelegramService'],
+        chat_id: int,
+        audio: bytes,
+        telegram_connected: bool,
+    ) -> None:
+        response = requests.post(
+            f'https://api.telegram.org/bot{config.telegram.bot_token}/sendVoice',
+            data={
+                'chat_id': str(chat_id),
+                'reply_markup': json.dumps(cls._connect_keyboard(telegram_connected)),
+            },
+            files={'voice': ('response.ogg', audio, 'audio/ogg')},
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
+            timeout=60,
+        )
+        response.raise_for_status()
 
     @classmethod
     async def set_webhook(cls: type['TelegramService'], webhook_url: str) -> None:
@@ -231,7 +296,12 @@ class TelegramService:
                 idempotency_key=f'telegram:{update_id}' if update_id is not None else None,
             )
             if answer is not None and is_new:
-                await cls.send_message(telegram_chat_id, answer.content, cls._connect_keyboard(is_platform_connected))
+                await cls.send_assistant_response(
+                    telegram_chat_id,
+                    answer.id,
+                    answer.content,
+                    is_platform_connected,
+                )
         except Exception:
             logger.exception('telegram_update_processing_failed chat_suffix=%s update_id=%s', str(telegram_chat_id)[-4:], update.get('update_id'))
             await db.rollback()
