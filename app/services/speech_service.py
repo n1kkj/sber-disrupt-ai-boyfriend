@@ -52,13 +52,17 @@ class GeminiSpeechService:
             raise ValueError('Не задан GEMINI_API_KEY для синтеза речи.')
         client = genai.Client(
             api_key=config.gemini.api_key,
-            http_options=types.HttpOptions(base_url=cls._native_base_url()),
+            http_options=types.HttpOptions(
+                base_url=cls._native_base_url(),
+                timeout=120_000,
+            ),
         )
         response = client.models.generate_content(
             model=config.gemini.tts_model,
             contents=text,
             config=types.GenerateContentConfig(
                 response_modalities=['AUDIO'],
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 speech_config=types.SpeechConfig(
                     voice_config=types.VoiceConfig(
                         prebuilt_voice_config=types.PrebuiltVoiceConfig(
