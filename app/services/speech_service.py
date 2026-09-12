@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 import subprocess
 from typing import Any, Dict, NoReturn
 
@@ -57,7 +58,7 @@ class GeminiSpeechService:
             raise ValueError('Не задан GEMINI_API_KEY для синтеза речи.')
         url = (
             f'{cls._native_base_url()}/v1beta/models/'
-            f'{config.gemini.tts_model}:generateContent'
+            f'{config.gemini.tts_model}:streamGenerateContent?alt=sse'
         )
         payload: Dict[str, Any] = {
             'model': config.gemini.tts_model,
@@ -74,35 +75,50 @@ class GeminiSpeechService:
             },
         }
         logger.info('gemini_speech_http_started url=%s', url)
+        audio_chunks = bytearray()
         with HttpClientFactory.get_httpx_proxy_client('gemini', timeout=120.0) as client:
-            response = client.post(
+            with client.stream(
+                'POST',
                 url,
                 headers={
                     'x-goog-api-key': config.gemini.api_key,
                     'Content-Type': 'application/json',
                 },
                 json=payload,
-            )
-        logger.info(
-            'gemini_speech_http_completed status=%s bytes=%s content_type=%s',
-            response.status_code,
-            len(response.content),
-            response.headers.get('content-type', ''),
-        )
-        if response.is_error:
-            error_body = response.text[:2000]
-            raise ValueError(
-                f'Artemox TTS HTTP {response.status_code}: {error_body}'
-            )
-        response_data: Dict[str, Any] = response.json()
-        for candidate in response_data.get('candidates', []):
-            content = candidate.get('content') or {}
-            for part in content.get('parts', []):
-                inline_data = part.get('inlineData') or part.get('inline_data') or {}
-                encoded_audio = inline_data.get('data')
-                if encoded_audio:
-                    return base64.b64decode(encoded_audio)
-        raise ValueError('Gemini не вернул candidates[].content.parts[].inlineData.data')
+            ) as response:
+                logger.info(
+                    'gemini_speech_http_started status=%s content_type=%s',
+                    response.status_code,
+                    response.headers.get('content-type', ''),
+                )
+                if response.is_error:
+                    error_body = response.read().decode('utf-8', errors='replace')[:2000]
+                    raise ValueError(
+                        f'Artemox TTS HTTP {response.status_code}: {error_body}'
+                    )
+                for raw_line in response.iter_lines():
+                    line = raw_line.decode('utf-8') if isinstance(raw_line, bytes) else raw_line
+                    line = line.strip()
+                    if not line or line == 'data: [DONE]':
+                        continue
+                    if line.startswith('data:'):
+                        line = line[5:].strip()
+                    try:
+                        response_data: Dict[str, Any] = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.warning('gemini_speech_sse_invalid_line chars=%s', len(line))
+                        continue
+                    for candidate in response_data.get('candidates', []):
+                        content = candidate.get('content') or {}
+                        for part in content.get('parts', []):
+                            inline_data = part.get('inlineData') or part.get('inline_data') or {}
+                            encoded_audio = inline_data.get('data')
+                            if encoded_audio:
+                                audio_chunks.extend(base64.b64decode(encoded_audio))
+        logger.info('gemini_speech_http_completed bytes=%s', len(audio_chunks))
+        if not audio_chunks:
+            raise ValueError('Gemini не вернул аудио в streamGenerateContent')
+        return bytes(audio_chunks)
 
     @classmethod
     def _native_base_url(cls: type['GeminiSpeechService']) -> str:
