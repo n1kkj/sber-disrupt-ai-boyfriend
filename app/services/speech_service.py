@@ -14,7 +14,14 @@ class GeminiSpeechService:
         status_code = getattr(error, 'status_code', None) or getattr(error, 'code', None)
         error_text = str(error).casefold()
         logger.error('gemini_speech_provider_error status=%s error=%s', status_code, error)
-        if status_code in {400, 401, 403} or 'api key' in error_text or 'unauthorized' in error_text:
+        if (
+            status_code in {400, 401, 403}
+            or '400 bad request' in error_text
+            or '401 unauthorized' in error_text
+            or '403 forbidden' in error_text
+            or 'api key' in error_text
+            or 'unauthorized' in error_text
+        ):
             raise ValueError(
                 'Artemox отклонил Gemini TTS-запрос. Проверьте GEMINI_API_KEY, '
                 'GEMINI_NATIVE_BASE_URL, GEMINI_TTS_MODEL и GEMINI_TTS_VOICE.'
@@ -53,6 +60,7 @@ class GeminiSpeechService:
             f'{config.gemini.tts_model}:generateContent'
         )
         payload: Dict[str, Any] = {
+            'model': config.gemini.tts_model,
             'contents': [{'parts': [{'text': text}]}],
             'generationConfig': {
                 'responseModalities': ['AUDIO'],
@@ -81,7 +89,11 @@ class GeminiSpeechService:
             len(response.content),
             response.headers.get('content-type', ''),
         )
-        response.raise_for_status()
+        if response.is_error:
+            error_body = response.text[:2000]
+            raise ValueError(
+                f'Artemox TTS HTTP {response.status_code}: {error_body}'
+            )
         response_data: Dict[str, Any] = response.json()
         for candidate in response_data.get('candidates', []):
             content = candidate.get('content') or {}

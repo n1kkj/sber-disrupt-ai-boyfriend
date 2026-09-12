@@ -44,7 +44,7 @@ class ProcessSpeechTask(Task):
             logger.info('celery_speech_task_completed assistant_message_id=%s', assistant_message_id)
             return {'assistant_message_id': assistant_message_id, 'status': 'completed'}
         except Exception as error:
-            if self.request.retries >= config.celery.max_retries:
+            if isinstance(error, ValueError) or self.request.retries >= config.celery.max_retries:
                 RedisTaskService.save_state(assistant_message_id, task_id, 'failed', str(error))
                 logger.exception('celery_speech_task_failed assistant_message_id=%s', assistant_message_id)
                 raise
