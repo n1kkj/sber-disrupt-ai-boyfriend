@@ -13,6 +13,7 @@ DB_PASS=postgres
 JWT_SECRET=replace-with-a-long-random-string
 GEMINI_API_KEY=your-key
 GEMINI_MODEL=gemini-2.5-flash
+GEMINI_TRANSCRIPTION_MODEL=your-transcription-model
 GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 GEMINI_BASE_URL=https://api.artemox.com/v1
 GEMINI_PROXY_URL=http://user:password@proxy-host:port

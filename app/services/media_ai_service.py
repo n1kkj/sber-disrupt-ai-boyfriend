@@ -2,6 +2,7 @@ import base64
 from typing import Any, List, NoReturn, Optional
 
 from langchain_openai import ChatOpenAI
+from openai import AsyncOpenAI
 
 from app.clients.http_client import HttpClientFactory
 from app.logging import logger
@@ -19,6 +20,17 @@ class GeminiMultimodalService:
             base_url=config.gemini.base_url,
             temperature=0,
             http_client=HttpClientFactory.get_httpx_proxy_client('gemini'),
+            http_async_client=HttpClientFactory.get_httpx_async_proxy_client('gemini'),
+        )
+
+    @classmethod
+    def _audio_client(cls: type['GeminiMultimodalService']) -> AsyncOpenAI:
+        if not config.gemini.api_key:
+            raise ValueError('Не задан GEMINI_API_KEY для распознавания audio.')
+        return AsyncOpenAI(
+            api_key=config.gemini.api_key,
+            base_url=config.gemini.base_url,
+            http_client=HttpClientFactory.get_httpx_async_proxy_client('gemini'),
         )
 
     @classmethod
@@ -30,7 +42,7 @@ class GeminiMultimodalService:
         if status_code in {400, 401, 403} or 'api key' in error_text or 'unauthorized' in error_text:
             raise ValueError(
                 'LiteLLM отклонил запрос media. Проверьте GEMINI_API_KEY, GEMINI_BASE_URL '
-                'и имя GEMINI_MODEL в окружении Celery worker.'
+                'и модели GEMINI_MODEL/GEMINI_TRANSCRIPTION_MODEL в окружении Celery worker.'
             ) from error
         raise error
 
@@ -59,20 +71,21 @@ class GeminiMultimodalService:
         mime_type: str,
     ) -> str:
         logger.info('gemini_audio_transcription_started bytes=%s mime=%s', len(data), mime_type)
-        audio_format = cls._audio_format(mime_type)
-        text = await cls._invoke([
-            {
-                'type': 'text',
-                'text': 'Точно транскрибируй аудио на языке оригинала. Верни только текст без комментариев и оформления.',
-            },
-            {
-                'type': 'input_audio',
-                'input_audio': {
-                    'data': base64.b64encode(data).decode('ascii'),
-                    'format': audio_format,
-                },
-            },
-        ])
+        filename = 'audio.wav' if mime_type in {'audio/wav', 'audio/x-wav'} else 'audio.mp3'
+        model = config.gemini.transcription_model or config.gemini.model
+        try:
+            response = await cls._audio_client().audio.transcriptions.create(
+                model=model,
+                file=(filename, data, mime_type),
+                response_format='text',
+                prompt='Точно транскрибируй аудио на языке оригинала. Верни только текст без комментариев и оформления.',
+            )
+        except Exception as error:
+            cls._raise_provider_error(error)
+        text = response if isinstance(response, str) else str(getattr(response, 'text', '') or '')
+        text = text.strip()
+        if not text:
+            raise ValueError('Artemox не вернул текст транскрибации')
         logger.info('gemini_audio_transcription_completed chars=%s', len(text))
         return text
 
@@ -119,15 +132,3 @@ class GeminiMultimodalService:
         text = await cls._invoke(contents)
         logger.info('gemini_video_description_completed chars=%s', len(text))
         return text
-
-    @classmethod
-    def _audio_format(cls: type['GeminiMultimodalService'], mime_type: str) -> str:
-        return {
-            'audio/wav': 'wav',
-            'audio/x-wav': 'wav',
-            'audio/mpeg': 'mp3',
-            'audio/mp3': 'mp3',
-            'audio/mp4': 'mp4',
-            'audio/ogg': 'ogg',
-            'audio/webm': 'webm',
-        }.get(mime_type, 'wav')

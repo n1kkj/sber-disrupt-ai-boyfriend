@@ -16,6 +16,14 @@ class HttpClientFactory:
         return httpx.Client(timeout=45.0)
 
     @classmethod
+    def get_httpx_async_proxy_client(cls: type['HttpClientFactory'], provider: str) -> httpx.AsyncClient:
+        proxy_url = cls._get_proxy_url(provider)
+        logger.debug('async_http_client_created provider=%s proxy=%s', provider, bool(proxy_url))
+        if proxy_url:
+            return httpx.AsyncClient(timeout=45.0, proxy=proxy_url)
+        return httpx.AsyncClient(timeout=45.0)
+
+    @classmethod
     def get_requests_proxies(cls: type['HttpClientFactory'], provider: str) -> Dict[str, str]:
         proxy_url = cls._get_proxy_url(provider)
         logger.debug('requests_proxy_resolved provider=%s configured=%s', provider, bool(proxy_url))

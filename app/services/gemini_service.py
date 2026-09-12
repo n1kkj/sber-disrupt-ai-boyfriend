@@ -27,6 +27,7 @@ class GeminiAIService:
             base_url=config.gemini.base_url,
             temperature=temperature,
             http_client=HttpClientFactory.get_httpx_proxy_client('gemini'),
+            http_async_client=HttpClientFactory.get_httpx_async_proxy_client('gemini'),
         )
 
     @classmethod
@@ -42,6 +43,7 @@ class GeminiAIService:
             tiktoken_enabled=False,
             check_embedding_ctx_length=False,
             http_client=HttpClientFactory.get_httpx_proxy_client('gemini'),
+            http_async_client=HttpClientFactory.get_httpx_async_proxy_client('gemini'),
         )
 
     @classmethod
