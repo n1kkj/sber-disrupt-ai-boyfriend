@@ -32,6 +32,7 @@ class MessageService:
         external_id: Optional[str] = None,
         idempotency_key: Optional[str] = None,
         scheduled_at: Optional[datetime] = None,
+        message_type: str = 'text',
     ) -> Tuple[Message, Optional[Message], Optional[str], bool]:
         logger.info(
             'message_enqueue_started user_id=%s chat_id=%s platform=%s external_id_present=%s scheduled=%s',
@@ -66,6 +67,7 @@ class MessageService:
                 return existing, None, task_id, False
             existing.status = 'queued'
             existing.error_message = None
+            existing.message_type = message_type
             existing.scheduled_at = scheduled_at.replace(tzinfo=None) if scheduled_at is not None else None
             user_message = existing
         else:
@@ -77,6 +79,7 @@ class MessageService:
                 platform=platform,
                 external_id=external_id,
                 idempotency_key=idempotency_key or str(uuid4()),
+                message_type=message_type,
                 status='queued',
                 scheduled_at=scheduled_at.replace(tzinfo=None) if scheduled_at is not None else None,
             )

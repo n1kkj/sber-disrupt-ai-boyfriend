@@ -40,7 +40,6 @@ class TelegramConfig(BaseSettings):
     mode: str = 'webhook'
     polling_timeout: int = 25
     link_token_ttl_minutes: int = 10
-    response_mode: str = 'text'
     proxy_url: Optional[str] = None
     model_config = SettingsConfigDict(env_prefix='TELEGRAM_', env_file='.env', extra='ignore')
 

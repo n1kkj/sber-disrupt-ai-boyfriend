@@ -1,7 +1,8 @@
 import asyncio
 import json
+import re
 import secrets
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 import requests
@@ -80,13 +81,10 @@ class TelegramService:
         assistant_message_id: UUID,
         text: str,
         telegram_connected: bool,
+        send_audio: bool = False,
     ) -> None:
-        mode = config.telegram.response_mode.casefold()
-        if mode not in {'text', 'voice', 'both'}:
-            raise ValueError('TELEGRAM_RESPONSE_MODE должен быть text, voice или both')
-        if mode in {'text', 'both'}:
-            await cls.send_message(chat_id, text, cls._connect_keyboard(telegram_connected))
-        if mode in {'voice', 'both'}:
+        await cls.send_message(chat_id, text, cls._connect_keyboard(telegram_connected))
+        if send_audio:
             from app.tasks.speech_task import process_speech_task
 
             process_speech_task.apply_async(
@@ -94,10 +92,9 @@ class TelegramService:
                 queue='tts',
             )
             logger.info(
-                'telegram_speech_enqueued chat_suffix=%s assistant_message_id=%s mode=%s',
+                'telegram_speech_enqueued chat_suffix=%s assistant_message_id=%s',
                 str(chat_id)[-4:],
                 assistant_message_id,
-                mode,
             )
 
     @classmethod
@@ -209,6 +206,14 @@ class TelegramService:
             platform_url = f'{config.platform_url.rstrip("/")}/?telegram_link={raw_token}'
             await cls.send_message(telegram_chat_id, f'Открой ссылку и войди или зарегистрируйся на платформе. Ссылка действует до {expires_at:%H:%M}.\n\n{platform_url}', cls._connect_keyboard(False))
             return
+        text, audio_requested = cls._extract_audio_command(text)
+        if not text and media_payload is None:
+            await cls.send_message(
+                telegram_chat_id,
+                'Напиши сообщение и добавь /audio, если нужен голосовой ответ.',
+                cls._connect_keyboard(is_platform_connected),
+            )
+            return
         try:
             allowed, retry_after = await asyncio.to_thread(
                 RateLimitService.consume,
@@ -294,6 +299,7 @@ class TelegramService:
                 platform='telegram',
                 external_id=external_id,
                 idempotency_key=f'telegram:{update_id}' if update_id is not None else None,
+                message_type='audio_request' if audio_requested else 'text',
             )
             if answer is not None and is_new:
                 await cls.send_assistant_response(
@@ -312,6 +318,13 @@ class TelegramService:
         if connected:
             return {'remove_keyboard': True}
         return {'keyboard': [[{'text': 'Подключиться к платформе'}]], 'resize_keyboard': True, 'is_persistent': True}
+
+    @classmethod
+    def _extract_audio_command(cls: type['TelegramService'], text: str) -> Tuple[str, bool]:
+        pattern = r'(?<!\S)/audio(?!\S)'
+        audio_requested = re.search(pattern, text, flags=re.IGNORECASE) is not None
+        clean_text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
+        return clean_text, audio_requested
 
     @classmethod
     def _get_media_payload(

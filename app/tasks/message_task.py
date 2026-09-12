@@ -38,6 +38,7 @@ class ProcessMessageTask(Task):
                         assistant.id,
                         assistant.content,
                         telegram_connected,
+                        message.message_type == 'audio_request',
                     )
                 )
             RedisTaskService.save_state(message_id, task_id, 'completed')
