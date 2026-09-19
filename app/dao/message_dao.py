@@ -97,6 +97,19 @@ class MessageDao:
         return message
 
     @classmethod
+    async def set_memory_visibility(
+        cls: type['MessageDao'],
+        db: AsyncSession,
+        message: Message,
+        visibility: str,
+    ) -> Message:
+        if visibility not in {'normal', 'short_term_only', 'blocked'}:
+            raise ValueError('Unknown memory visibility')
+        message.memory_visibility = visibility
+        await db.flush()
+        return message
+
+    @classmethod
     async def commit_pair(cls: type['MessageDao'], db: AsyncSession, first: Message, second: Message) -> tuple[Message, Message]:
         first.status = 'completed'
         second.status = 'completed'

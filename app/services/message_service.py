@@ -7,19 +7,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dao.chat_dao import ChatDao
 from app.dao.character_version_dao import CharacterVersionDao
+from app.dao.memory_suppression_dao import MemorySuppressionDao
 from app.dao.message_dao import MessageDao
 from app.dao.onboarding_dao import OnboardingDao
 from app.dao.user_profile_dao import UserProfileDao
 from app.dao.user_dao import UserDao
 from app.logging import logger
 from app.models.message import Message
+from app.services.companion_prompt_service import CompanionPromptService
 from app.services.gemini_service import GeminiAIService
 from app.services.gender_addressing_service import GenderAndAddressingService
 from app.services.memory_service import MemoryService
 from app.services.onboarding_service import OnboardingService
 from app.services.redis_task_service import RedisTaskService
 from app.services.reminder_service import ReminderService
-from app.services.companion_prompt_service import CompanionPromptService
+from app.services.safety_service import SafetyService
 
 
 class MessageService:
@@ -179,24 +181,60 @@ class MessageService:
         message.error_message = None
         await db.commit()
         await db.refresh(message)
+
         try:
+            safety = await SafetyService.check_input(message.content)
+            if safety.decision != 'allow':
+                await MessageDao.set_memory_visibility(db, message, 'blocked')
+                if safety.decision == 'crisis':
+                    reply_text = SafetyService.crisis_response()
+                else:
+                    reply_text = 'С этим запросом я не буду продолжать, но могу помочь перевести разговор в безопасное русло.'
+                assistant = await MessageDao.create(
+                    db,
+                    chat.id,
+                    'assistant',
+                    reply_text,
+                    platform=message.platform,
+                    message_type='text',
+                    status='completed',
+                    reply_to_message_id=message.id,
+                )
+                await ChatDao.touch(db, chat.id)
+                message, assistant = await MessageDao.commit_pair(db, message, assistant)
+                logger.info('message_safety_handled message_id=%s decision=%s', message.id, safety.decision)
+                return message, assistant, telegram_id, telegram_connected
+
             reminder = await ReminderService.analyze_and_schedule(db, chat, profile, message)
             history = await MessageDao.list_for_chat(db, chat.id)
+            suppressions = await MemorySuppressionDao.list_for_user(db, chat.user_id)
             context = MemoryService.select_context(
                 [item for item in history if item.status == 'completed'] + [message],
                 message.content,
+                suppressions=suppressions,
             )
             prompt_messages: List[Dict[str, str]] = [
                 {'role': item.role, 'content': item.content}
                 for item in context
                 if item.role in {'user', 'assistant'}
             ]
+            memory_context = await MemoryService.build_long_term_context(
+                db,
+                chat.user_id,
+                message.content,
+                datetime.now(timezone.utc),
+            )
             system_prompt = (
                 'Сначала определи стиль и пол компаньона по критическим настройкам ниже. '
                 'Если базовый prompt противоречит им, всегда соблюдай критические настройки.\n\n'
                 + character.system_prompt
                 + GenderAndAddressingService.build_context(profile, character)
                 + CompanionPromptService.capability_policy()
+                + '\n\nПравила диалога Druk: отвечай естественно, спокойно и по делу. '
+                'Если пользователь выговаривается, не спеши давать советы и не превращай разговор в терапию. '
+                'Предпочитай одну уместную мысль длинному универсальному списку. Задавай вопрос только если он '
+                'реально двигает разговор дальше. Не поощряй зависимость, эксклюзивность или изоляцию от близких.'
+                + MemoryService.render_prompt_context(memory_context)
             )
             if reminder is not None:
                 system_prompt += (
@@ -206,6 +244,9 @@ class MessageService:
                     'отправлять сообщения по расписанию.'
                 )
             reply_text = await GeminiAIService.generate_reply(system_prompt, prompt_messages)
+            audit = await SafetyService.audit_output(message.content, reply_text, memory_context)
+            if not audit.approved or audit.rewrite_needed:
+                reply_text = await SafetyService.rewrite_output(message.content, reply_text, memory_context, audit)
         except Exception as error:
             logger.exception('message_ai_processing_failed message_id=%s', message_id)
             await MessageDao.mark_failed(db, message, str(error))

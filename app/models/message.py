@@ -44,4 +44,6 @@ class Message(Base):
         index=True,
     )
     scheduled_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime, nullable=True, index=True)
+    memory_visibility: Mapped[str] = mapped_column(sa.String(20), default='normal', server_default='normal')
+    memory_processed_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime, default=Base.utcnow, index=True)
