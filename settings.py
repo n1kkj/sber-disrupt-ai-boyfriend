@@ -27,6 +27,8 @@ class GeminiConfig(BaseSettings):
     transcription_model: Optional[str] = None
     tts_model: str = 'gemini-3.1-flash-tts-preview'
     tts_voice: str = 'Kore'
+    tts_male_voice: str = 'Puck'
+    tts_female_voice: str = 'Kore'
     tts_response_format: Optional[str] = None
     native_base_url: Optional[str] = 'https://api.artemox.com'
     embedding_model: str = 'gemini-embedding-001'
@@ -40,9 +42,11 @@ class TelegramConfig(BaseSettings):
     bot_username: str = ''
     webhook_secret: str = ''
     mode: str = 'webhook'
+    show_connect_button: bool = True
     polling_timeout: int = 25
     link_token_ttl_minutes: int = 10
     proxy_url: Optional[str] = None
+    sticker_file_ids: str = ''
     model_config = SettingsConfigDict(env_prefix='TELEGRAM_', env_file='.env', extra='ignore')
 
 
@@ -58,6 +62,7 @@ class CeleryConfig(BaseSettings):
     retry_backoff_seconds: int = 5
     retry_backoff_max_seconds: int = 300
     task_time_limit_seconds: int = 180
+    broker_visibility_timeout_seconds: int = 900
     model_config = SettingsConfigDict(env_prefix='CELERY_', env_file='.env', extra='ignore')
 
 
@@ -131,7 +136,7 @@ class Settings(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     media: MediaConfig = Field(default_factory=MediaConfig)
-    debug: bool = True
+    debug: bool = False
     app_title: str = 'AI boyfriend MVP'
     platform_url: str = 'http://localhost:3000'
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')

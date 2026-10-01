@@ -1,5 +1,6 @@
 import json
 import re
+import secrets
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -16,6 +17,7 @@ from app.models.user_profile import UserProfile
 from app.services.companion_prompt_service import CompanionPromptService
 from app.services.gender_addressing_service import GenderAndAddressingService
 from app.services.gemini_service import GeminiAIService
+from settings import config
 
 
 class ReactionService:
@@ -30,6 +32,22 @@ class ReactionService:
         '😡': 'angry',
         '🤔': 'thoughtful',
         '🎉': 'celebration',
+        '🥰': 'affection',
+        '😍': 'admiration',
+        '😘': 'kiss',
+        '👏': 'applause',
+        '🙏': 'gratitude',
+        '💯': 'approval',
+        '✨': 'sparkle',
+        '😎': 'cool',
+        '🙈': 'shy',
+        '😮': 'surprise',
+        '🤗': 'hug',
+        '💔': 'heartbreak',
+        '😴': 'sleepy',
+        '🤍': 'white_love',
+        '💖': 'sparkling_love',
+        '🌟': 'star',
     }
     _allowed_emojis = tuple(_titles.keys())
 
@@ -101,6 +119,7 @@ class ReactionService:
         chat: Chat,
         profile: UserProfile,
         telegram_chat_id: int,
+        allow_sticker: bool = True,
     ) -> Optional[ReactionEvent]:
         if message.platform != 'telegram' or message.role != 'user' or not message.external_id:
             return None
@@ -109,26 +128,37 @@ class ReactionService:
             return None
         decision = await cls._choose_reaction(character, profile, message.content)
         emoji = decision.get('emoji')
-        if decision.get('should_react') is not True or emoji not in cls._allowed_emojis:
+        should_react = decision.get('should_react') is True and emoji in cls._allowed_emojis
+        should_send_sticker = allow_sticker and decision.get('send_sticker') is True
+        sticker_file_ids = [item.strip() for item in config.telegram.sticker_file_ids.split(',') if item.strip()]
+        if not should_react and not (should_send_sticker and sticker_file_ids):
             return None
         telegram_message_id = cls._telegram_message_id(message.external_id)
         if telegram_message_id is None:
             return None
         from app.services.telegram_service import TelegramService
 
-        await TelegramService.set_message_reaction(telegram_chat_id, telegram_message_id, emoji)
-        external_event_id = f'model:{message.id}:{emoji}'
-        event = await cls._create_event(
-            db,
-            chat.user_id,
-            chat.id,
-            message.id,
-            'assistant',
-            'add',
-            emoji,
-            external_event_id,
-            {'source': 'model', 'reason': decision.get('reason', '')},
-        )
+        event = None
+        if should_react:
+            await TelegramService.set_message_reaction(telegram_chat_id, telegram_message_id, emoji)
+            external_event_id = f'model:{message.id}:{emoji}'
+            event = await cls._create_event(
+                db,
+                chat.user_id,
+                chat.id,
+                message.id,
+                'assistant',
+                'add',
+                emoji,
+                external_event_id,
+                {'source': 'model', 'reason': decision.get('reason', '')},
+            )
+        if should_send_sticker and sticker_file_ids:
+            await TelegramService.send_sticker(
+                telegram_chat_id,
+                secrets.choice(sticker_file_ids),
+                telegram_message_id,
+            )
         await db.commit()
         return event
 
@@ -166,9 +196,12 @@ class ReactionService:
             + CompanionPromptService.capability_policy()
             + '\n\nОпредели, уместно ли персонажу поставить реакцию на сообщение пользователя. '
             'Выбирай реакцию только если она естественно отражает эмоцию персонажа. '
-            'Верни только JSON: {"should_react":true,"emoji":"👍","reason":"..."}. '
+            'Верни только один JSON без текста до и после: '
+            '{"should_react":true,"emoji":"👍","send_sticker":false,"reason":"..."}. '
             f'Допустимые emoji: {", ".join(cls._allowed_emojis)}. '
-            'Если реакция не нужна, верни {"should_react":false}. '
+            'Разнообразь уместные реакции и не выбирай постоянно один и тот же emoji. '
+            'Стикер предлагай только при сильной эмоциональной уместности. '
+            'Если реакция и стикер не нужны, верни {"should_react":false,"send_sticker":false}. '
         )
         try:
             result = await GeminiAIService.generate_reply(
@@ -176,7 +209,10 @@ class ReactionService:
                 [{'role': 'user', 'content': user_text}],
             )
             cleaned = re.sub(r'^```(?:json)?\s*|\s*```$', '', result.strip(), flags=re.IGNORECASE)
-            parsed = json.loads(cleaned)
+            object_start = cleaned.find('{')
+            if object_start < 0:
+                raise ValueError('В ответе модели не найден JSON')
+            parsed, _ = json.JSONDecoder().raw_decode(cleaned[object_start:])
             return parsed if isinstance(parsed, dict) else {'should_react': False}
         except Exception:
             logger.exception('Не удалось определить реакцию персонажа')

@@ -1,9 +1,10 @@
-FROM python:3.12
+FROM python:3.14-slim
 
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

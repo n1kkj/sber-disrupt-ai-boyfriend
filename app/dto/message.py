@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class MessageRequest(BaseModel):
@@ -20,6 +20,10 @@ class MessageResponse(BaseModel):
     external_id: str | None
     scheduled_at: datetime | None
     created_at: datetime
+
+    @field_serializer('content')
+    def serialize_content(self, value: str) -> str:
+        return value.replace('[[MESSAGE_BREAK]]', '\n\n').replace('[[SEND_STICKER]]', '').replace('[Стикер]', '')
 
 
 class MessageTaskResponse(BaseModel):

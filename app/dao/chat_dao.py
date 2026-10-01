@@ -12,6 +12,10 @@ from app.models.message import Message
 
 class ChatDao:
     @classmethod
+    async def get_by_id(cls: type['ChatDao'], db: AsyncSession, chat_id: UUID) -> Optional[Chat]:
+        return await db.scalar(sa.select(Chat).where(Chat.id == chat_id))
+
+    @classmethod
     async def get(cls: type['ChatDao'], db: AsyncSession, user_id: UUID, chat_id: UUID) -> Optional[Chat]:
         return await db.scalar(sa.select(Chat).where(Chat.id == chat_id, Chat.user_id == user_id))
 

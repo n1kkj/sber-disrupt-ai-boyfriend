@@ -163,6 +163,23 @@ class GeminiMultimodalService:
         return text
 
     @classmethod
+    async def describe_sticker(
+        cls: type['GeminiMultimodalService'],
+        data: bytes,
+        mime_type: str,
+    ) -> str:
+        logger.info('Начато описание стикера Gemini bytes=%s mime=%s', len(data), mime_type)
+        contents = [
+            'Определи смысл и эмоциональный посыл стикера для личного диалога. '
+            'Кратко опиши персонажа, действие, эмоцию и уместный контекст, если они понятны. '
+            'Не выдумывай детали, 1-3 предложения.',
+            types.Part.from_bytes(data=data, mime_type=mime_type),
+        ]
+        text = await cls._generate_text(contents)
+        logger.info('Описание стикера Gemini завершено chars=%s', len(text))
+        return text
+
+    @classmethod
     async def describe_video_frames(
         cls: type['GeminiMultimodalService'],
         frames: List[bytes],

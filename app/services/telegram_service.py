@@ -58,7 +58,13 @@ class TelegramService:
         return await ChatDao.commit(db, chat)
 
     @classmethod
-    async def send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> Optional[int]:
+    async def send_message(
+        cls: type['TelegramService'],
+        chat_id: int,
+        text: str,
+        reply_markup: Optional[Dict[str, Any]] = None,
+        reply_to_message_id: Optional[int] = None,
+    ) -> Optional[int]:
         if not config.telegram.bot_token:
             logger.warning('telegram_send_skipped reason=bot_token_missing')
             return None
@@ -71,7 +77,14 @@ class TelegramService:
             telegram_message_id = None
             for index, text_part in enumerate(text_parts):
                 current_markup = reply_markup if index == len(text_parts) - 1 else None
-                telegram_message_id = await asyncio.to_thread(cls._send_message, chat_id, text_part, current_markup)
+                current_reply_to = reply_to_message_id if index == 0 else None
+                telegram_message_id = await asyncio.to_thread(
+                    cls._send_message,
+                    chat_id,
+                    text_part,
+                    current_markup,
+                    current_reply_to,
+                )
         except Exception:
             logger.exception('telegram_send_failed chat_suffix=%s', str(chat_id)[-4:])
             raise
@@ -79,10 +92,18 @@ class TelegramService:
         return telegram_message_id
 
     @classmethod
-    def _send_message(cls: type['TelegramService'], chat_id: int, text: str, reply_markup: Optional[Dict[str, Any]] = None) -> int:
+    def _send_message(
+        cls: type['TelegramService'],
+        chat_id: int,
+        text: str,
+        reply_markup: Optional[Dict[str, Any]] = None,
+        reply_to_message_id: Optional[int] = None,
+    ) -> int:
         payload: Dict[str, Any] = {'chat_id': chat_id, 'text': text}
         if reply_markup is not None:
             payload['reply_markup'] = reply_markup
+        if reply_to_message_id is not None:
+            payload['reply_parameters'] = {'message_id': reply_to_message_id}
         response = requests.post(
             f'https://api.telegram.org/bot{config.telegram.bot_token}/sendMessage',
             json=payload,
@@ -114,6 +135,65 @@ class TelegramService:
         await asyncio.to_thread(cls._set_message_reaction, chat_id, message_id, emoji)
 
     @classmethod
+    async def send_sticker(
+        cls: type['TelegramService'],
+        chat_id: int,
+        sticker_file_id: str,
+        reply_to_message_id: Optional[int] = None,
+    ) -> Optional[int]:
+        if not config.telegram.bot_token or not sticker_file_id:
+            logger.warning('Отправка стикера пропущена: не настроен bot token или sticker file id')
+            return None
+        return await asyncio.to_thread(cls._send_sticker, chat_id, sticker_file_id, reply_to_message_id)
+
+    @classmethod
+    def _send_sticker(
+        cls: type['TelegramService'],
+        chat_id: int,
+        sticker_file_id: str,
+        reply_to_message_id: Optional[int],
+    ) -> int:
+        payload: Dict[str, Any] = {'chat_id': chat_id, 'sticker': sticker_file_id}
+        if reply_to_message_id is not None:
+            payload['reply_parameters'] = {'message_id': reply_to_message_id}
+        response = requests.post(
+            f'https://api.telegram.org/bot{config.telegram.bot_token}/sendSticker',
+            json=payload,
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
+            timeout=20,
+        )
+        if not response.ok:
+            logger.error('Ошибка отправки стикера Telegram status=%s ответ=%s', response.status_code, response.text[:1000])
+        response.raise_for_status()
+        return int(response.json()['result']['message_id'])
+
+    @classmethod
+    async def send_typing(cls: type['TelegramService'], chat_id: int) -> None:
+        if not config.telegram.bot_token:
+            return
+        await asyncio.to_thread(cls._send_chat_action, chat_id)
+
+    @classmethod
+    async def typing_loop(cls: type['TelegramService'], chat_id: int) -> None:
+        try:
+            while True:
+                await cls.send_typing(chat_id)
+                await asyncio.sleep(4)
+        except asyncio.CancelledError:
+            raise
+
+    @classmethod
+    def _send_chat_action(cls: type['TelegramService'], chat_id: int) -> None:
+        response = requests.post(
+            f'https://api.telegram.org/bot{config.telegram.bot_token}/sendChatAction',
+            json={'chat_id': chat_id, 'action': 'typing'},
+            proxies=HttpClientFactory.get_requests_proxies('telegram'),
+            timeout=20,
+        )
+        if not response.ok:
+            logger.warning('Не удалось показать статус печати Telegram status=%s', response.status_code)
+
+    @classmethod
     def _set_message_reaction(
         cls: type['TelegramService'],
         chat_id: int,
@@ -137,10 +217,55 @@ class TelegramService:
     @classmethod
     def _split_message(cls: type['TelegramService'], text: str) -> List[str]:
         max_length = 4096
-        if len(text) <= max_length:
-            return [text]
-        logger.warning('telegram_message_split text_chars=%s', len(text))
-        return [text[index:index + max_length] for index in range(0, len(text), max_length)]
+        normalized_text = text.replace('—', '-').replace('–', '-')
+        explicit_parts = [
+            part.strip()
+            for part in re.split(r'\s*(?:\[\[MESSAGE_BREAK\]\]|\n+)\s*', normalized_text)
+            if part.strip()
+        ]
+        if not explicit_parts:
+            explicit_parts = [normalized_text.strip()]
+        sentence_parts: List[str] = []
+        for explicit_part in explicit_parts:
+            parts = re.split(r'(?<![.!?,;])[.!?,;](?![.!?,;])\s+(?=[^\s])', explicit_part)
+            if len(parts) > 1:
+                last_part = parts[-1].strip()
+                if (
+                    len(last_part.split()) <= 2
+                    and last_part[:1].isupper()
+                    and re.search(r',\s*' + re.escape(last_part) + r'\s*$', explicit_part) is not None
+                ):
+                    parts = parts[:-1]
+            for part in parts:
+                clean_part = part.strip().rstrip('.,!?;')
+                if not clean_part:
+                    continue
+                sentence_parts.append(clean_part)
+        merged_parts: List[str] = []
+        for sentence_part in sentence_parts:
+            if merged_parts and cls._is_standalone_emoji(sentence_part):
+                merged_parts[-1] = f'{merged_parts[-1]} {sentence_part}'
+            else:
+                merged_parts.append(sentence_part)
+        result: List[str] = []
+        for sentence_part in merged_parts:
+            if len(sentence_part) <= max_length:
+                result.append(sentence_part)
+            else:
+                result.extend(
+                    sentence_part[index:index + max_length]
+                    for index in range(0, len(sentence_part), max_length)
+                )
+        if len(result) > 1:
+            logger.info('Ответ Telegram разделен на сообщения count=%s', len(result))
+        return result
+
+    @classmethod
+    def _is_standalone_emoji(cls: type['TelegramService'], text: str) -> bool:
+        value = text.strip()
+        if not value or len(value) > 8:
+            return False
+        return not any(character.isalnum() for character in value)
 
     @classmethod
     async def send_assistant_response(
@@ -150,8 +275,33 @@ class TelegramService:
         text: str,
         telegram_connected: bool,
         send_audio: bool = False,
+        reply_to_message_id: Optional[int] = None,
     ) -> Optional[int]:
-        telegram_message_id = await cls.send_message(chat_id, text, cls._connect_keyboard(telegram_connected))
+        sticker_requested = '[[SEND_STICKER]]' in text or re.search(r'\[Стикер\]', text, flags=re.IGNORECASE) is not None
+        clean_text = text.replace('[[SEND_STICKER]]', '').strip()
+        clean_text = re.sub(r'\[Стикер\]', '', clean_text, flags=re.IGNORECASE).strip()
+        sticker_file_ids = [item.strip() for item in config.telegram.sticker_file_ids.split(',') if item.strip()]
+        if sticker_requested and sticker_file_ids:
+            telegram_message_id = None
+            if clean_text:
+                telegram_message_id = await cls.send_message(
+                    chat_id,
+                    clean_text,
+                    cls._connect_keyboard(telegram_connected),
+                    reply_to_message_id,
+                )
+            sticker_message_id = await cls.send_sticker(chat_id, secrets.choice(sticker_file_ids), reply_to_message_id)
+            if telegram_message_id is None:
+                telegram_message_id = sticker_message_id
+        else:
+            if sticker_requested and not sticker_file_ids:
+                logger.warning('Запрошен стикер, но TELEGRAM_STICKER_FILE_IDS не настроен')
+            telegram_message_id = await cls.send_message(
+                chat_id,
+                clean_text or text,
+                cls._connect_keyboard(telegram_connected),
+                reply_to_message_id,
+            )
         if send_audio:
             from app.tasks.speech_task import process_speech_task
 
@@ -321,6 +471,7 @@ class TelegramService:
             )
             return
         try:
+            await cls.send_typing(telegram_chat_id)
             allowed, retry_after = await asyncio.to_thread(
                 RateLimitService.consume,
                 'telegram',
@@ -371,6 +522,7 @@ class TelegramService:
                     'audio': config.media.max_audio_bytes,
                     'image': config.media.max_image_bytes,
                     'video': config.media.max_video_bytes,
+                    'sticker': config.media.max_image_bytes,
                 }
                 media_data = await asyncio.to_thread(cls._download_file, file_id, media_limits[message_type])
                 _, _, task_id = await MediaService.create_asset_message(
@@ -421,7 +573,7 @@ class TelegramService:
 
     @classmethod
     def _connect_keyboard(cls: type['TelegramService'], connected: bool = False) -> Dict[str, Any]:
-        if connected:
+        if connected or not config.telegram.show_connect_button:
             return {'remove_keyboard': True}
         return {'keyboard': [[{'text': 'Подключиться к платформе'}]], 'resize_keyboard': True, 'is_persistent': True}
 
@@ -575,9 +727,19 @@ class TelegramService:
         audio = message.get('audio')
         if audio is not None:
             return str(audio['file_id']), str(audio.get('mime_type') or 'audio/mpeg'), str(audio.get('file_name') or 'audio'), 'audio'
+        video_note = message.get('video_note')
+        if video_note is not None:
+            return str(video_note['file_id']), 'video/mp4', 'video_note.mp4', 'video'
         video = message.get('video')
         if video is not None:
             return str(video['file_id']), str(video.get('mime_type') or 'video/mp4'), str(video.get('file_name') or 'video.mp4'), 'video'
+        sticker = message.get('sticker')
+        if sticker is not None:
+            if sticker.get('is_video'):
+                return str(sticker['file_id']), 'video/webm', 'sticker.webm', 'sticker'
+            if sticker.get('is_animated'):
+                return str(sticker['file_id']), 'application/x-tgsticker', 'sticker.tgs', 'sticker'
+            return str(sticker['file_id']), 'image/webp', 'sticker.webp', 'sticker'
         photo = message.get('photo')
         if photo:
             image = photo[-1]

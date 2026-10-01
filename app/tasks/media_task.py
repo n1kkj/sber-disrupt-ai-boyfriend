@@ -41,6 +41,7 @@ class ProcessMediaTask(Task):
                 'audio': MediaService.process_audio,
                 'image': MediaService.process_image,
                 'video': MediaService.process_video,
+                'sticker': MediaService.process_sticker,
             }[self.media_type]
             await processor(session, UUID(asset_id))
 
@@ -60,6 +61,12 @@ class ProcessVideoTask(ProcessMediaTask):
     media_type = 'video'
 
 
+class ProcessStickerTask(ProcessMediaTask):
+    name = 'app.tasks.media_task.ProcessStickerTask'
+    media_type = 'sticker'
+
+
 process_audio_task = celery_app.register_task(ProcessAudioTask())
 process_image_task = celery_app.register_task(ProcessImageTask())
 process_video_task = celery_app.register_task(ProcessVideoTask())
+process_sticker_task = celery_app.register_task(ProcessStickerTask())

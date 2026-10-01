@@ -5,6 +5,7 @@ from uuid import UUID
 from celery import Task
 
 from app.celery_app import celery_app
+from app.dao.character_version_dao import CharacterVersionDao
 from app.dao.message_dao import MessageDao
 from app.database import async_session
 from app.logging import logger
@@ -58,10 +59,22 @@ class ProcessSpeechTask(Task):
 
     async def _synthesize(self: 'ProcessSpeechTask', assistant_message_id: str) -> bytes:
         async with async_session() as session:
-            message = await MessageDao.get_by_id(session, UUID(assistant_message_id))
-            if message is None or message.role != 'assistant':
+            message_data = await MessageDao.get_with_chat_boyfriend(session, UUID(assistant_message_id))
+            if message_data is None:
                 raise LookupError('Assistant message not found')
-            return await GeminiSpeechService.synthesize(message.content)
+            message, chat, boyfriend = message_data
+            if message.role != 'assistant':
+                raise LookupError('Assistant message not found')
+            character = await CharacterVersionDao.get_active(session, boyfriend.id)
+            voice = config.gemini.tts_voice
+            if character is not None and character.voice_profile:
+                voice = character.voice_profile
+            elif character is not None and character.gender == 'female':
+                voice = config.gemini.tts_female_voice
+            elif character is not None and character.gender == 'male':
+                voice = config.gemini.tts_male_voice
+            logger.info('Голос TTS выбран gender=%s voice=%s', character.gender if character else 'unknown', voice)
+            return await GeminiSpeechService.synthesize(message.content, voice)
 
 
 process_speech_task = celery_app.register_task(ProcessSpeechTask())

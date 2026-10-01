@@ -22,10 +22,20 @@ from app.services.memory_service import MemoryService
 from app.services.onboarding_service import OnboardingService
 from app.services.redis_task_service import RedisTaskService
 from app.services.reminder_service import ReminderService
+from app.services.companion_prompt_service import CompanionPromptService
+from app.services.feedback_service import FeedbackService
 from app.services.safety_service import SafetyService
 
 
 class MessageService:
+    @classmethod
+    async def is_telegram_reply_delivered(
+        cls: type['MessageService'],
+        db: AsyncSession,
+        message_id: UUID,
+    ) -> bool:
+        return await MessageDao.is_telegram_reply_delivered(db, message_id)
+
     @classmethod
     async def attach_external_id(
         cls: type['MessageService'],
@@ -245,7 +255,7 @@ class MessageService:
                     'Обязательно подтверди пользователю, что ты напомнишь ему. Не говори, что у тебя нет технической возможности '
                     'отправлять сообщения по расписанию.'
                 )
-            reply_text = await GeminiAIService.generate_reply(system_prompt, prompt_messages)
+            reply_text = cls._normalize_reply(await GeminiAIService.generate_reply(system_prompt, prompt_messages))
             audit = await SafetyService.audit_output(message.content, reply_text, memory_context)
             if not audit.approved or audit.rewrite_needed:
                 reply_text = await SafetyService.rewrite_output(message.content, reply_text, memory_context, audit)
@@ -268,6 +278,10 @@ class MessageService:
         message, assistant = await MessageDao.commit_pair(db, message, assistant)
         logger.info('message_processing_completed message_id=%s assistant_id=%s', message.id, assistant.id)
         return message, assistant, telegram_id, telegram_connected
+
+    @classmethod
+    def _normalize_reply(cls: type['MessageService'], text: str) -> str:
+        return text.replace('—', '-').replace('–', '-').strip()
 
     @classmethod
     async def cancel_message(

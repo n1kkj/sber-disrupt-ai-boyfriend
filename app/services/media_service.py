@@ -22,7 +22,7 @@ from settings import config
 
 
 class MediaService:
-    _allowed_types = {'audio', 'image', 'video'}
+    _allowed_types = {'audio', 'image', 'video', 'sticker'}
 
     @classmethod
     async def create_asset_message(
@@ -116,6 +116,63 @@ class MediaService:
         except Exception as error:
             await cls._mark_failed(db, asset, message, error)
             raise
+
+    @classmethod
+    async def process_sticker(cls: type['MediaService'], db: AsyncSession, asset_id: UUID) -> None:
+        asset, message = await cls._get_asset_message(db, asset_id, 'sticker')
+        await MediaAssetDao.mark_processing(db, asset)
+        try:
+            sticker_path = LocalStorageService.get_path(asset.storage_key or '')
+            if asset.mime_type == 'image/webp':
+                data = await LocalStorageService.read_bytes(asset.storage_key or '')
+                description = await GeminiMultimodalService.describe_sticker(data, 'image/webp')
+            elif asset.mime_type in {'video/webm', 'video/mp4'}:
+                data = await asyncio.to_thread(cls._extract_sticker_frame, sticker_path)
+                description = await GeminiMultimodalService.describe_sticker(data, 'image/png')
+            elif asset.mime_type == 'application/x-tgsticker':
+                data = await LocalStorageService.read_bytes(asset.storage_key or '')
+                frame = await asyncio.to_thread(cls._render_tgs_first_frame, data)
+                description = await GeminiMultimodalService.describe_sticker(frame, 'image/png')
+            else:
+                description = 'Неизвестный формат стикера. Сохрани его как эмоциональный сигнал пользователя и учитывай вместе с контекстом диалога.'
+            await MediaAssetDao.mark_completed(db, asset, None, description)
+            message.content = f'[Стикер]\nОписание: {description}'
+            await cls._enqueue_message(db, message)
+        except Exception as error:
+            await cls._mark_failed(db, asset, message, error)
+            raise
+
+    @classmethod
+    def _extract_sticker_frame(cls: type['MediaService'], path: Path) -> bytes:
+        result = subprocess.run(
+            [
+                'ffmpeg', '-y', '-v', 'error', '-i', str(path),
+                '-frames:v', '1', '-f', 'image2', '-c:v', 'png', 'pipe:1',
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout:
+            error = result.stderr.decode('utf-8', errors='replace').strip()
+            raise ValueError(f'Не удалось извлечь кадр видео-стикера: {error}')
+        return result.stdout
+
+    @classmethod
+    def _render_tgs_first_frame(cls: type['MediaService'], data: bytes) -> bytes:
+        try:
+            from io import BytesIO
+
+            from lottie.exporters.cairo import export_png
+            from lottie.parsers.tgs import parse_tgs
+        except ImportError as error:
+            raise RuntimeError('Для обработки TGS не установлен python-lottie или Cairo') from error
+        animation = parse_tgs(BytesIO(data))
+        output = BytesIO()
+        export_png(animation, output, frame=0)
+        frame = output.getvalue()
+        if not frame:
+            raise ValueError('Рендерер TGS не вернул первый кадр')
+        return frame
 
     @classmethod
     async def process_video(cls: type['MediaService'], db: AsyncSession, asset_id: UUID) -> None:
@@ -239,6 +296,7 @@ class MediaService:
             'audio': 'app.tasks.media_task.ProcessAudioTask',
             'image': 'app.tasks.media_task.ProcessImageTask',
             'video': 'app.tasks.media_task.ProcessVideoTask',
+            'sticker': 'app.tasks.media_task.ProcessStickerTask',
         }[message_type]
         queue = message_type
         celery_app.send_task(task_name, args=[str(asset_id)], task_id=task_id, queue=queue)
@@ -251,13 +309,19 @@ class MediaService:
             'audio': config.media.max_audio_bytes,
             'image': config.media.max_image_bytes,
             'video': config.media.max_video_bytes,
+            'sticker': config.media.max_image_bytes,
         }
         if size_bytes > limits[message_type]:
             raise ValueError(f'Файл превышает лимит {limits[message_type] // 1024 // 1024} МБ')
 
     @classmethod
     def _placeholder(cls: type['MediaService'], message_type: str) -> str:
-        return {'audio': '[Аудиосообщение обрабатывается]', 'image': '[Изображение обрабатывается]', 'video': '[Видео обрабатывается]'}[message_type]
+        return {
+            'audio': '[Аудиосообщение обрабатывается]',
+            'image': '[Изображение обрабатывается]',
+            'video': '[Видео обрабатывается]',
+            'sticker': '[Стикер обрабатывается]',
+        }[message_type]
 
     @classmethod
     def _suffix_for_mime(cls: type['MediaService'], mime_type: str) -> str:
@@ -267,6 +331,7 @@ class MediaService:
             'audio/wav': '.wav',
             'image/jpeg': '.jpg',
             'image/png': '.png',
+            'image/webp': '.webp',
             'video/mp4': '.mp4',
             'video/webm': '.webm',
         }.get(mime_type, '.bin')

@@ -25,18 +25,18 @@ class GeminiSpeechService:
         raise error
 
     @classmethod
-    async def synthesize(cls: type['GeminiSpeechService'], text: str) -> bytes:
-        clean_text = text.strip()
+    async def synthesize(cls: type['GeminiSpeechService'], text: str, voice: str = '') -> bytes:
+        clean_text = text.replace('[[MESSAGE_BREAK]]', ' ').replace('[[SEND_STICKER]]', ' ').replace('[Стикер]', ' ').strip()
         if not clean_text:
             raise ValueError('Нельзя синтезировать пустой текст')
         logger.info(
             'gemini_speech_started chars=%s model=%s voice=%s',
             len(clean_text),
             config.gemini.tts_model,
-            config.gemini.tts_voice,
+            voice or config.gemini.tts_voice,
         )
         try:
-            pcm_audio = await asyncio.to_thread(cls._generate_pcm, clean_text)
+            pcm_audio = await asyncio.to_thread(cls._generate_pcm, clean_text, voice or config.gemini.tts_voice)
             logger.info('gemini_speech_pcm_received bytes=%s', len(pcm_audio))
             audio = await asyncio.to_thread(cls._convert_to_telegram_ogg, pcm_audio)
             logger.info('gemini_speech_ogg_converted bytes=%s', len(audio))
@@ -48,7 +48,7 @@ class GeminiSpeechService:
         return audio
 
     @classmethod
-    def _generate_pcm(cls: type['GeminiSpeechService'], text: str) -> bytes:
+    def _generate_pcm(cls: type['GeminiSpeechService'], text: str, voice: str) -> bytes:
         if not config.gemini.api_key:
             raise ValueError('Не задан GEMINI_API_KEY для синтеза речи.')
         client_args = {}
@@ -72,7 +72,7 @@ class GeminiSpeechService:
                     speech_config=types.SpeechConfig(
                         voice_config=types.VoiceConfig(
                             prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                voice_name=config.gemini.tts_voice,
+                                voice_name=voice,
                             )
                         )
                     ),
