@@ -1,3 +1,5 @@
 #!/bin/bash
+set -e
 
-gunicorn main:app --bind 0.0.0.0:8000 --worker-class uvicorn.workers.UvicornWorker
+alembic upgrade head
+exec gunicorn main:app --bind 0.0.0.0:8000 --worker-class uvicorn.workers.UvicornWorker

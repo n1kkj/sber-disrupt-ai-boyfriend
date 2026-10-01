@@ -70,6 +70,28 @@ class ProactiveConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='PROACTIVE_', env_file='.env', extra='ignore')
 
 
+class MemoryConfig(BaseSettings):
+    enabled: bool = True
+    model: str = 'gemini-3.1-flash-lite'
+    max_context_items: int = Field(default=8, ge=1, le=50)
+    max_context_episodes: int = Field(default=3, ge=0, le=20)
+    max_context_events: int = Field(default=5, ge=0, le=20)
+    allow_sensitive: bool = False
+    episode_summary_enabled: bool = True
+    episode_every_user_messages: int = Field(default=10, ge=2, le=100)
+    event_followups_enabled: bool = True
+    event_followup_scan_limit: int = Field(default=100, ge=1, le=1000)
+    model_config = SettingsConfigDict(env_prefix='MEMORY_', env_file='.env', extra='ignore')
+
+
+class SafetyConfig(BaseSettings):
+    enabled: bool = True
+    model: str = 'gemini-3.1-flash-lite'
+    llm_input_enabled: bool = False
+    output_audit_enabled: bool = False
+    model_config = SettingsConfigDict(env_prefix='SAFETY_', env_file='.env', extra='ignore')
+
+
 class LoggingConfig(BaseSettings):
     level: str = 'INFO'
     file_path: str = 'logs/app.log'
@@ -104,6 +126,8 @@ class Settings(BaseSettings):
     redis: RedisConfig = Field(default_factory=RedisConfig)
     celery: CeleryConfig = Field(default_factory=CeleryConfig)
     proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    safety: SafetyConfig = Field(default_factory=SafetyConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     media: MediaConfig = Field(default_factory=MediaConfig)

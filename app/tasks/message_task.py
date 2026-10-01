@@ -77,6 +77,16 @@ class ProcessMessageTask(Task):
                         asyncio.run(create_character_reaction())
                     except Exception:
                         logger.exception('Не удалось поставить реакцию персонажа message_id=%s', message.id)
+
+            if message.role == 'user' and message.status == 'completed' and config.memory.enabled:
+                try:
+                    from app.tasks.memory_task import process_memory_task
+
+                    process_memory_task.apply_async(args=[str(message.id)], queue='memory')
+                    logger.info('memory_task_dispatched message_id=%s', message.id)
+                except Exception:
+                    logger.exception('memory_task_dispatch_failed message_id=%s', message.id)
+
             RedisTaskService.save_state(message_id, task_id, 'completed')
             logger.info('celery_message_task_completed message_id=%s task_id=%s', message_id, task_id)
             return {
