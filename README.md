@@ -53,10 +53,9 @@ RATE_LIMIT_WINDOW_SECONDS=60
 
 ```bash
 docker compose up -d --build
-docker compose exec app alembic upgrade head
 ```
 
-Сообщение отправляется в Celery и сразу возвращает `202 Accepted`. Ответ
+Перед запуском API/worker/beat одноразовый сервис `migrate` выполняет `alembic upgrade head`. Сообщение отправляется в Celery и сразу возвращает `202 Accepted`. Ответ
 worker сохраняет в общую историю. Для повторяемого запроса передавайте
 `X-Idempotency-Key`. Для отложенного сообщения передавайте в JSON
 `scheduled_at` в будущем, например `2026-09-08T18:30:00+03:00`.
@@ -65,12 +64,13 @@ worker сохраняет в общую историю. Для повторяе�
 `GET /api/v1/auth/me`, `GET /api/v1/boyfriends`, `POST /api/v1/chats`,
 `POST /api/v1/chats/{chat_id}/messages`,
 `POST /api/v1/chats/{chat_id}/messages/{message_id}/cancel`,
+`GET /api/v1/memory/facts`, `DELETE /api/v1/memory/facts/{fact_id}`,
 `POST /api/v1/chats/{chat_id}/media`,
 `POST /api/v1/telegram/webhook`.
 
 Фоновые процессы: `app` обслуживает API, `worker` обрабатывает сообщения и
-медиа в очередях `messages`, `audio`, `image`, `video`,
-`beat` зарезервирован для будущих регулярных задач, Redis хранит broker,
+медиа и память в очередях `messages`, `audio`, `image`, `video`, `tts`, `memory`, `proactive`.
+`beat` запускает регулярный поиск кандидатов для проактивных сообщений, Redis хранит broker,
 result backend и состояние отменяемых message tasks.
 
 Для текста и media используется OpenAI-compatible LiteLLM gateway через
@@ -102,7 +102,9 @@ result backend и состояние отменяемых message tasks.
 `logs/app.log` с ротацией файла. В логах нет паролей, токенов и полного текста
 сообщений.
 
-RAG пока намеренно простой: к последним сообщениям добавляются до восьми исторических сообщений с пересечением слов запроса и текста. Это дешевый MVP-слой, который можно заменить на embeddings/pgvector после появления реальных диалогов.
+RAG по истории пока намеренно простой: к последним сообщениям добавляются исторические сообщения с пересечением слов запроса и текста. Поверх него работает отдельная структурированная память о фактах, людях, эпизодах и событиях. `GET /api/v1/memory/facts` возвращает только активные факты текущего пользователя. `DELETE /api/v1/memory/facts/{fact_id}` логически открепляет факт от пользовательской памяти: retrieval его больше не использует, но запись и отдельное событие удаления остаются в БД для внутренней аналитики.
+
+На текущем этапе **автоматическое забывание отключено**. Shadow memory-agent не получает в своей active JSON-схеме операции удаления/замены и не помечает старые факты `superseded` при противоречии с новым сообщением. Заготовки для model-driven deletion/conflict resolution сохранены в DTO/service-коде и явно помечены `RESERVED / DISABLED`, но не подключены к worker pipeline и не занимают prompt/output tokens. Единственный активный destructive path для фактов — явный пользовательский `DELETE /api/v1/memory/facts/{fact_id}`. `do_not_store_turn` остаётся отдельным write-gate для текущего сообщения и не удаляет уже сохранённые факты.
 
 ---
 
