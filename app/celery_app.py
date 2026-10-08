@@ -7,12 +7,19 @@ celery_app = Celery(
     'ai_companion',
     broker=config.redis.url,
     backend=config.redis.url,
-    include=['app.tasks.message_task', 'app.tasks.media_task', 'app.tasks.speech_task', 'app.tasks.proactive_task'],
+    include=[
+        'app.tasks.message_task',
+        'app.tasks.media_task',
+        'app.tasks.speech_task',
+        'app.tasks.proactive_task',
+        'app.tasks.memory_task',
+    ],
 )
 celery_app.conf.update(
     task_default_queue=config.celery.default_queue,
     task_routes={
         'app.tasks.message_task.ProcessMessageTask': {'queue': 'messages'},
+        'app.tasks.memory_task.ProcessMemoryTask': {'queue': 'memory'},
         'app.tasks.speech_task.ProcessSpeechTask': {'queue': 'tts'},
         'app.tasks.proactive_task.ScanProactiveCandidatesTask': {'queue': 'proactive'},
         'app.tasks.proactive_task.ProcessProactiveMessageTask': {'queue': 'proactive'},

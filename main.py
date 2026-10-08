@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.dao.boyfriend_dao import BoyfriendDao
-from app.database import async_engine, async_session
+from app.database import async_session, async_engine
 from app.logging import logger
 from app.middleware import RequestLoggingMiddleware
 from app.models.base_model import Base
@@ -26,8 +26,8 @@ class ApplicationLifecycle:
         polling_task = None
         stop_event = asyncio.Event()
         try:
-            async with async_engine.begin() as async_session:
-                main_app.state.db = async_session
+            async with async_engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
             logger.info('database_schema_ready')
             main_app.state.db = self.session_factory
             async with self.session_factory() as session:
