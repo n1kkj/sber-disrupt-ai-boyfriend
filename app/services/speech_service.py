@@ -26,7 +26,13 @@ class GeminiSpeechService:
 
     @classmethod
     async def synthesize(cls: type['GeminiSpeechService'], text: str, voice: str = '') -> bytes:
-        clean_text = text.replace('[[MESSAGE_BREAK]]', ' ').replace('[[SEND_STICKER]]', ' ').replace('[Стикер]', ' ').strip()
+        clean_text = (
+            text.replace('[[MESSAGE_BREAK]]', ' ')
+            .replace('[[SEND_STICKER]]', ' ')
+            .replace('[Стикер]', ' ')
+            .replace('[STRICT],', ',')
+            .strip()
+        )
         if not clean_text:
             raise ValueError('Нельзя синтезировать пустой текст')
         logger.info(

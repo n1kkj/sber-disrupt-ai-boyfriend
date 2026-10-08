@@ -76,6 +76,14 @@ class TelegramService:
             text_parts = cls._split_message(text)
             telegram_message_id = None
             for index, text_part in enumerate(text_parts):
+                if index > 0:
+                    delay = cls._get_message_delay(text_part)
+                    logger.info(
+                        'Задержка перед частью ответа Telegram seconds=%s text_chars=%s',
+                        delay,
+                        len(text_part),
+                    )
+                    await asyncio.sleep(delay)
                 current_markup = reply_markup if index == len(text_parts) - 1 else None
                 current_reply_to = reply_to_message_id if index == 0 else None
                 telegram_message_id = await asyncio.to_thread(
@@ -227,7 +235,9 @@ class TelegramService:
             explicit_parts = [normalized_text.strip()]
         sentence_parts: List[str] = []
         for explicit_part in explicit_parts:
-            parts = re.split(r'(?<![.!?,;])[.!?,;](?![.!?,;])\s+(?=[^\s])', explicit_part)
+            strict_comma_token = 'STRICT_COMMA_TOKEN'
+            protected_part = explicit_part.replace('[STRICT],', strict_comma_token)
+            parts = re.split(r'(?<=[.!?,;])\s+(?=[^\s])', protected_part)
             if len(parts) > 1:
                 last_part = parts[-1].strip()
                 if (
@@ -237,7 +247,7 @@ class TelegramService:
                 ):
                     parts = parts[:-1]
             for part in parts:
-                clean_part = part.strip().rstrip('.,!?;')
+                clean_part = part.strip().rstrip('.,;').replace(strict_comma_token, ',')
                 if not clean_part:
                     continue
                 sentence_parts.append(clean_part)
@@ -259,6 +269,13 @@ class TelegramService:
         if len(result) > 1:
             logger.info('Ответ Telegram разделен на сообщения count=%s', len(result))
         return result
+
+    @classmethod
+    def _get_message_delay(cls: type['TelegramService'], text: str) -> float:
+        min_length = 40
+        max_length = 120
+        bounded_length = min(max(len(text), min_length), max_length)
+        return round(1 + (bounded_length - min_length) / (max_length - min_length) * 2, 2)
 
     @classmethod
     def _is_standalone_emoji(cls: type['TelegramService'], text: str) -> bool:
